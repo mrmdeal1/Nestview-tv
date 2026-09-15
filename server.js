@@ -1,4 +1,7 @@
+
 const http = require("http");
+
+const https = require("https");
 
 const PORT = process.env.PORT || 10000;
 
@@ -30,59 +33,161 @@ function sendJson(res, status, data) {
 
 }
 
-async function getAccessToken() {
+function postForm(hostname, path, data) {
 
-  if (!refreshToken) {
+  return new Promise((resolve, reject) => {
 
-    throw new Error("NestView TV is not authorized yet.");
+    const body = new URLSearchParams(data).toString();
 
-  }
+    const req = https.request(
 
-  const response = await fetch(
+      {
 
-    "https://oauth2.googleapis.com/token",
+        hostname,
 
-    {
+        path,
 
-      method: "POST",
+        method: "POST",
 
-      headers: {
+        headers: {
 
-        "Content-Type": "application/x-www-form-urlencoded"
+          "Content-Type": "application/x-www-form-urlencoded",
+
+          "Content-Length": Buffer.byteLength(body)
+
+        }
 
       },
 
-      body: new URLSearchParams({
+      (response) => {
 
-        client_id: CLIENT_ID,
+        let result = "";
 
-        client_secret: CLIENT_SECRET,
+        response.on("data", chunk => {
 
-        refresh_token: refreshToken,
+          result += chunk;
 
-        grant_type: "refresh_token"
+        });
 
-      })
+        response.on("end", () => {
+
+          resolve({
+
+            status: response.statusCode,
+
+            body: result
+
+          });
+
+        });
+
+      }
+
+    );
+
+    req.on("error", reject);
+
+    req.write(body);
+
+    req.end();
+
+  });
+
+}
+
+function getJson(hostname, path, token) {
+
+  return new Promise((resolve, reject) => {
+
+    const req = https.request(
+
+      {
+
+        hostname,
+
+        path,
+
+        method: "GET",
+
+        headers: {
+
+          Authorization: `Bearer ${token}`,
+
+          "Content-Type": "application/json"
+
+        }
+
+      },
+
+      (response) => {
+
+        let result = "";
+
+        response.on("data", chunk => {
+
+          result += chunk;
+
+        });
+
+        response.on("end", () => {
+
+          resolve({
+
+            status: response.statusCode,
+
+            body: result
+
+          });
+
+        });
+
+      }
+
+    );
+
+    req.on("error", reject);
+
+    req.end();
+
+  });
+
+}
+
+async function refreshAccessToken() {
+
+  if (!refreshToken) {
+
+    throw new Error("No refresh token available");
+
+  }
+
+  const result = await postForm(
+
+    "oauth2.googleapis.com",
+
+    "/token",
+
+    {
+
+      client_id: CLIENT_ID,
+
+      client_secret: CLIENT_SECRET,
+
+      refresh_token: refreshToken,
+
+      grant_type: "refresh_token"
 
     }
 
   );
 
-  const data = await response.json();
+  const data = JSON.parse(result.body);
 
-  if (!response.ok) {
-
-    console.log("Google refresh error:", {
-
-      error: data.error,
-
-      error_description: data.error_description
-
-    });
+  if (result.status !== 200) {
 
     throw new Error(
 
-      data.error_description || data.error || "Could not refresh Google access token."
+      data.error_description || "Token refresh failed"
 
     );
 
@@ -102,13 +207,13 @@ const server = http.createServer(async (req, res) => {
 
       req.url,
 
-      `https://${req.headers.host || "nestview-tv.onrender.com"}`
+      `https://${req.headers.host}`
 
     );
 
     if (url.pathname === "/") {
 
-      return sendJson(res, 200, {
+      sendJson(res, 200, {
 
         app: "NestView TV",
 
@@ -120,19 +225,35 @@ const server = http.createServer(async (req, res) => {
 
       });
 
+      return;
+
     }
 
     if (url.pathname === "/health") {
 
-      return sendJson(res, 200, {
+      sendJson(res, 200, {
 
         status: "ok"
 
       });
 
+      return;
+
     }
 
     if (url.pathname === "/auth") {
+
+      if (!CLIENT_ID || !CLIENT_SECRET || !PROJECT_ID) {
+
+        sendJson(res, 500, {
+
+          error: "Missing environment variables"
+
+        });
+
+        return;
+
+      }
 
       const params = new URLSearchParams({
 
@@ -146,13 +267,17 @@ const server = http.createServer(async (req, res) => {
 
         response_type: "code",
 
-        scope: "https://www.googleapis.com/auth/sdm.service"
+        scope:
+
+          "https://www.googleapis.com/auth/sdm.service"
 
       });
 
       const authUrl =
 
-        `https://nestservices.google.com/partnerconnections/${PROJECT_ID}/auth?${params.toString()}`;
+        `https://nestservices.google.com/partnerconnections/` +
+
+        `${PROJECT_ID}/auth?${params.toString()}`;
 
       res.writeHead(302, {
 
@@ -160,7 +285,9 @@ const server = http.createServer(async (req, res) => {
 
       });
 
-      return res.end();
+      res.end();
+
+      return;
 
     }
 
@@ -168,81 +295,97 @@ const server = http.createServer(async (req, res) => {
 
       const code = url.searchParams.get("code");
 
+      const error = url.searchParams.get("error");
+
+      if (error) {
+
+        sendJson(res, 400, {
+
+          error
+
+        });
+
+        return;
+
+      }
+
       if (!code) {
 
-        return sendJson(res, 400, {
+        sendJson(res, 400, {
 
           error: "Authorization code missing"
 
         });
 
+        return;
+
       }
 
-      const tokenResponse = await fetch(
+      const tokenResult = await postForm(
 
-        "https://oauth2.googleapis.com/token",
+        "oauth2.googleapis.com",
+
+        "/token",
 
         {
 
-          method: "POST",
+          client_id: CLIENT_ID,
 
-          headers: {
+          client_secret: CLIENT_SECRET,
 
-            "Content-Type": "application/x-www-form-urlencoded"
+          code,
 
-          },
+          grant_type: "authorization_code",
 
-          body: new URLSearchParams({
-
-            client_id: CLIENT_ID,
-
-            client_secret: CLIENT_SECRET,
-
-            code: code,
-
-            grant_type: "authorization_code",
-
-            redirect_uri: REDIRECT_URI
-
-          })
+          redirect_uri: REDIRECT_URI
 
         }
 
       );
 
-      const tokens = await tokenResponse.json();
+      let tokenData;
 
-      if (!tokenResponse.ok) {
+      try {
 
-        console.log("Google token exchange error:", {
+        tokenData = JSON.parse(tokenResult.body);
 
-          error: tokens.error,
+      } catch {
 
-          error_description: tokens.error_description
+        tokenData = {
 
-        });
+          error: tokenResult.body
 
-        return sendJson(res, tokenResponse.status, {
+        };
+
+      }
+
+      if (tokenResult.status !== 200) {
+
+        sendJson(res, tokenResult.status, {
 
           error: "Token exchange failed",
 
-          google_error: tokens.error,
+          details:
 
-          details: tokens.error_description
+            tokenData.error_description ||
+
+            tokenData.error ||
+
+            "Unknown error"
 
         });
 
-      }
-
-      accessToken = tokens.access_token;
-
-      if (tokens.refresh_token) {
-
-        refreshToken = tokens.refresh_token;
+        return;
 
       }
 
-      console.log("Google Nest authorization succeeded.");
+      accessToken = tokenData.access_token;
+
+      if (tokenData.refresh_token) {
+
+        refreshToken = tokenData.refresh_token;
+
+      }
 
       res.writeHead(200, {
 
@@ -250,17 +393,39 @@ const server = http.createServer(async (req, res) => {
 
       });
 
-      return res.end(`
+      res.end(`
+
+        <!doctype html>
 
         <html>
 
           <head>
 
-            <meta name="viewport" content="width=device-width, initial-scale=1">
+            <meta
+
+              name="viewport"
+
+              content="width=device-width,initial-scale=1"
+
+            >
+
+            <title>NestView TV</title>
 
           </head>
 
-          <body style="font-family:Arial;text-align:center;padding:50px">
+          <body
+
+            style="
+
+              font-family:Arial,sans-serif;
+
+              text-align:center;
+
+              padding:60px 20px;
+
+            "
+
+          >
 
             <h2>NestView TV Connected</h2>
 
@@ -268,83 +433,113 @@ const server = http.createServer(async (req, res) => {
 
             <p>Your cameras are ready to be checked.</p>
 
+            <p>
+
+              <a href="/devices">
+
+                Check cameras
+
+              </a>
+
+            </p>
+
           </body>
 
         </html>
 
       `);
 
+      return;
+
     }
 
     if (url.pathname === "/devices") {
 
-      let token = accessToken;
+      if (!accessToken) {
 
-      if (!token) {
+        if (refreshToken) {
 
-        token = await getAccessToken();
+          await refreshAccessToken();
 
-      }
+        } else {
 
-      let response = await fetch(
+          res.writeHead(302, {
 
-        `https://smartdevicemanagement.googleapis.com/v1/enterprises/${PROJECT_ID}/devices`,
+            Location: "/auth"
 
-        {
+          });
 
-          headers: {
+          res.end();
 
-            Authorization: `Bearer ${token}`
-
-          }
+          return;
 
         }
 
+      }
+
+      let result = await getJson(
+
+        "smartdevicemanagement.googleapis.com",
+
+        `/v1/enterprises/${PROJECT_ID}/devices`,
+
+        accessToken
+
       );
 
-      if (response.status === 401 && refreshToken) {
+      if (
 
-        token = await getAccessToken();
+        result.status === 401 &&
 
-        response = await fetch(
+        refreshToken
 
-          `https://smartdevicemanagement.googleapis.com/v1/enterprises/${PROJECT_ID}/devices`,
+      ) {
 
-          {
+        await refreshAccessToken();
 
-            headers: {
+        result = await getJson(
 
-              Authorization: `Bearer ${token}`
+          "smartdevicemanagement.googleapis.com",
 
-            }
+          `/v1/enterprises/${PROJECT_ID}/devices`,
 
-          }
+          accessToken
 
         );
 
       }
 
-      const data = await response.json();
+      let data;
 
-      if (!response.ok) {
+      try {
 
-        console.log("Google SDM devices error:", {
+        data = JSON.parse(result.body);
 
-          status: response.status,
+      } catch {
 
-          error: data.error
+        data = {
 
-        });
+          raw: result.body
 
-        return sendJson(res, response.status, data);
+        };
 
       }
 
-      return sendJson(res, 200, data);
+      sendJson(
+
+        res,
+
+        result.status || 500,
+
+        data
+
+      );
+
+      return;
 
     }
 
-    return sendJson(res, 404, {
+    sendJson(res, 404, {
 
       error: "Not found"
 
@@ -352,6 +547,27 @@ const server = http.createServer(async (req, res) => {
 
   } catch (error) {
 
-    console.error("NestView server error:", error.message);
+    console.error(error);
 
+    sendJson(res, 500, {
+
+      error: "Server error",
+
+      details: error.message
+
+    });
+
+  }
+
+});
+
+server.listen(PORT, "0.0.0.0", () => {
+
+  console.log(
+
+    `NestView TV server running on port ${PORT}`
+
+  );
+
+});
     
