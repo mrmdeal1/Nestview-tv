@@ -455,7 +455,45 @@ const server = http.createServer(async (req, res) => {
     }
 
   }
+  if (url.pathname === "/viewer") {
 
+    res.writeHead(200, {
+
+      "Content-Type": "text/html"
+
+    });
+
+    res.end(`
+
+      <!doctype html>
+
+      <html>
+
+        <head>
+
+          <meta name="viewport" content="width=device-width, initial-scale=1">
+
+          <title>NestView TV</title>
+
+        </head>
+
+        <body style="background:#000;color:#fff;font-family:Arial;text-align:center;padding:40px;">
+
+          <h1>NestView TV</h1>
+
+          <p>Viewer is online.</p>
+
+          <p>Camera streaming setup is next.</p>
+
+        </body>
+
+      </html>
+
+    `);
+
+    return;
+
+  }
   sendJson(res, 404, {
 
     error: "Not found"
