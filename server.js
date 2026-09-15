@@ -655,9 +655,157 @@ const server = http.createServer(async (req, res) => {
 
           <h1>NestView TV</h1>
 
-          <p>Viewer is online.</p>
+          <video
 
-          <p>Camera streaming setup is next.</p>
+  id="camera"
+
+  autoplay
+
+  playsinline
+
+  muted
+
+  style="width:100%;max-width:1000px;background:#111;"
+
+></video>
+
+<p id="status">Ready to connect.</p>
+
+<button
+
+  id="startButton"
+
+  style="font-size:22px;padding:14px 28px;"
+
+>
+
+  Start Camera
+
+</button>
+
+<script>
+
+const startButton = document.getElementById("startButton");
+
+const statusText = document.getElementById("status");
+
+const video = document.getElementById("camera");
+
+startButton.addEventListener("click", async function () {
+
+  startButton.disabled = true;
+
+  statusText.textContent = "Finding cameras...";
+
+  try {
+
+    const devicesResponse = await fetch("/devices");
+
+    const devicesData = await devicesResponse.json();
+
+    if (!devicesData.devices || devicesData.devices.length === 0) {
+
+      throw new Error("No cameras found.");
+
+    }
+
+    const camera = devicesData.devices.find(function (device) {
+
+      return device.type === "sdm.devices.types.CAMERA";
+
+    });
+
+    if (!camera) {
+
+      throw new Error("No compatible camera found.");
+
+    }
+
+    statusText.textContent = "Starting live camera...";
+
+    const peer = new RTCPeerConnection();
+
+    peer.addTransceiver("video", {
+
+      direction: "recvonly"
+
+    });
+
+    peer.addTransceiver("audio", {
+
+      direction: "recvonly"
+
+    });
+
+    peer.ontrack = function (event) {
+
+      if (event.streams && event.streams[0]) {
+
+        video.srcObject = event.streams[0];
+
+      }
+
+    };
+
+    const offer = await peer.createOffer();
+
+    await peer.setLocalDescription(offer);
+
+    const response = await fetch("/api/webrtc", {
+
+      method: "POST",
+
+      headers: {
+
+        "Content-Type": "application/json"
+
+      },
+
+      body: JSON.stringify({
+
+        device: camera.name,
+
+        offerSdp: peer.localDescription.sdp
+
+      })
+
+    });
+
+    const result = await response.json();
+
+    if (!response.ok) {
+
+      throw new Error(JSON.stringify(result));
+
+    }
+
+    if (!result.results || !result.results.answerSdp) {
+
+      throw new Error("Google did not return a WebRTC answer.");
+
+    }
+
+    await peer.setRemoteDescription({
+
+      type: "answer",
+
+      sdp: result.results.answerSdp
+
+    });
+
+    statusText.textContent = "Live";
+
+  } catch (error) {
+
+    statusText.textContent = "Error: " + error.message;
+
+    startButton.disabled = false;
+
+  }
+
+});
+
+</script>
 
         </body>
 
