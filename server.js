@@ -513,7 +513,123 @@ const server = http.createServer(async (req, res) => {
     }
 
   }
-  if (url.pathname === "/viewer") {
+    if (url.pathname === "/api/webrtc" && req.method === "POST") {
+
+    try {
+
+      let body = "";
+
+      req.on("data", chunk => {
+
+        body += chunk;
+
+      });
+
+      req.on("end", async () => {
+
+        try {
+
+          const input = JSON.parse(body);
+
+          const device = input.device;
+
+          const offerSdp = input.offerSdp;
+
+          if (!device || !offerSdp) {
+
+            sendJson(res, 400, {
+
+              error: "device and offerSdp are required"
+
+            });
+
+            return;
+
+          }
+
+          const token = await getAccessToken();
+
+          if (!token) {
+
+            sendJson(res, 401, {
+
+              error: "Nest authorization required"
+
+            });
+
+            return;
+
+          }
+
+          const result = await googlePost(
+
+            "/v1/" + device + ":executeCommand",
+
+            token,
+
+            {
+
+              command: "sdm.devices.commands.CameraLiveStream.GenerateWebRtcStream",
+
+              params: {
+
+                offerSdp: offerSdp
+
+              }
+
+            }
+
+          );
+
+          let data;
+
+          try {
+
+            data = JSON.parse(result.data);
+
+          } catch {
+
+            data = {
+
+              raw: result.data
+
+            };
+
+          }
+
+          sendJson(res, result.status, data);
+
+        } catch (error) {
+
+          sendJson(res, 500, {
+
+            error: "WebRTC request failed",
+
+            details: error.message
+
+          });
+
+        }
+
+      });
+
+      return;
+
+    } catch (error) {
+
+      sendJson(res, 500, {
+
+        error: "WebRTC route failed",
+
+        details: error.message
+
+      });
+
+      return;
+
+    }
+
+  }if (url.pathname === "/viewer") {
 
     res.writeHead(200, {
 
