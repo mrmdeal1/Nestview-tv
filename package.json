@@ -1,0 +1,23 @@
+{
+
+  "name": "nestview-tv",
+
+  "version": "1.0.0",
+
+  "description": "NestView TV secure backend for Google Nest cameras",
+
+  "main": "server.js",
+
+  "scripts": {
+
+    "start": "node server.js"
+
+  },
+
+  "engines": {
+
+    "node": ">=20"
+
+  }
+
+}
