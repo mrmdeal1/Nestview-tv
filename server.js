@@ -12,187 +12,319 @@ const REDIRECT_URI =
 
   "https://nestview-tv.onrender.com/oauth/callback";
 
-const server = http.createServer((req, res) => {
+let accessToken = null;
 
-  const url = new URL(req.url, `https://${req.headers.host}`);
+let refreshToken = null;
 
-  if (url.pathname === "/") {
+function sendJson(res, status, data) {
 
-    res.writeHead(200, { "Content-Type": "application/json" });
+  res.writeHead(status, {
 
-    res.end(
+    "Content-Type": "application/json",
 
-      JSON.stringify({
+    "Access-Control-Allow-Origin": "*"
+
+  });
+
+  res.end(JSON.stringify(data, null, 2));
+
+}
+
+async function getAccessToken() {
+
+  if (!refreshToken) {
+
+    throw new Error("NestView TV is not authorized yet.");
+
+  }
+
+  const response = await fetch(
+
+    "https://oauth2.googleapis.com/token",
+
+    {
+
+      method: "POST",
+
+      headers: {
+
+        "Content-Type": "application/x-www-form-urlencoded"
+
+      },
+
+      body: new URLSearchParams({
+
+        client_id: CLIENT_ID,
+
+        client_secret: CLIENT_SECRET,
+
+        refresh_token: refreshToken,
+
+        grant_type: "refresh_token"
+
+      })
+
+    }
+
+  );
+
+  const data = await response.json();
+
+  if (!response.ok) {
+
+    throw new Error(
+
+      data.error_description || "Could not refresh Google access token."
+
+    );
+
+  }
+
+  accessToken = data.access_token;
+
+  return accessToken;
+
+}
+
+const server = http.createServer(async (req, res) => {
+
+  try {
+
+    const url = new URL(
+
+      req.url,
+
+      `https://${req.headers.host || "nestview-tv.onrender.com"}`
+
+    );
+
+    if (url.pathname === "/") {
+
+      return sendJson(res, 200, {
 
         app: "NestView TV",
 
         status: "online",
 
-        auth: "/auth"
+        auth: "/auth",
 
-      })
+        devices: "/devices"
 
-    );
-
-    return;
-
-  }
-
-  if (url.pathname === "/health") {
-
-    res.writeHead(200, { "Content-Type": "application/json" });
-
-    res.end(JSON.stringify({ status: "ok" }));
-
-    return;
-
-  }
-
-  if (url.pathname === "/auth") {
-
-    const authUrl =
-
-      `https://nestservices.google.com/partnerconnections/${PROJECT_ID}/auth` +
-
-      `?redirect_uri=${encodeURIComponent(REDIRECT_URI)}` +
-
-      `&access_type=offline` +
-
-      `&prompt=consent` +
-
-      `&client_id=${encodeURIComponent(CLIENT_ID)}` +
-
-      `&response_type=code` +
-
-      `&scope=${encodeURIComponent(
-
-        "https://www.googleapis.com/auth/sdm.service"
-
-      )}`;
-
-    res.writeHead(302, { Location: authUrl });
-
-    res.end();
-
-    return;
-
-  }
-
-  if (url.pathname === "/oauth/callback") {
-
-    const code = url.searchParams.get("code");
-
-    if (!code) {
-
-      res.writeHead(400, { "Content-Type": "text/plain" });
-
-      res.end("NestView TV did not receive an authorization code.");
-
-      return;
+      });
 
     }
 
-    const body = new URLSearchParams({
+    if (url.pathname === "/health") {
 
-      client_id: CLIENT_ID,
+      return sendJson(res, 200, {
 
-      client_secret: CLIENT_SECRET,
+        status: "ok"
 
-      code,
+      });
 
-      grant_type: "authorization_code",
+    }
 
-      redirect_uri: REDIRECT_URI
+    if (url.pathname === "/auth") {
 
-    }).toString();
+      const params = new URLSearchParams({
 
-    const request = require("https").request(
+        redirect_uri: REDIRECT_URI,
 
-      {
+        access_type: "offline",
 
-        hostname: "oauth2.googleapis.com",
+        prompt: "consent",
 
-        path: "/token",
+        client_id: CLIENT_ID,
 
-        method: "POST",
+        response_type: "code",
 
-        headers: {
+        scope: "https://www.googleapis.com/auth/sdm.service"
 
-          "Content-Type": "application/x-www-form-urlencoded",
+      });
 
-          "Content-Length": Buffer.byteLength(body)
+      const authUrl =
 
-        }
+        `https://nestservices.google.com/partnerconnections/${PROJECT_ID}/auth?${params}`;
 
-      },
+      res.writeHead(302, {
 
-      (googleRes) => {
+        Location: authUrl
 
-        let data = "";
+      });
 
-        googleRes.on("data", (chunk) => {
+      return res.end();
 
-          data += chunk;
+    }
 
-        });
+    if (url.pathname === "/oauth/callback") {
 
-        googleRes.on("end", () => {
+      const code = url.searchParams.get("code");
 
-          if (googleRes.statusCode < 200 || googleRes.statusCode >= 300) {
+      if (!code) {
 
-            res.writeHead(500, { "Content-Type": "text/plain" });
+        return sendJson(res, 400, {
 
-            res.end("Google authorization failed.");
-
-            return;
-
-          }
-
-          res.writeHead(200, { "Content-Type": "text/html" });
-
-          res.end(`
-
-            <html>
-
-              <body style="font-family:Arial;text-align:center;padding:40px">
-
-                <h1>NestView TV Connected</h1>
-
-                <p>Google Nest authorization succeeded.</p>
-
-                <p>You can return to NestView TV.</p>
-
-              </body>
-
-            </html>
-
-          `);
+          error: "Authorization code missing"
 
         });
 
       }
 
-    );
+      const tokenResponse = await fetch(
 
-    request.on("error", () => {
+        "https://oauth2.googleapis.com/token",
 
-      res.writeHead(500, { "Content-Type": "text/plain" });
+        {
 
-      res.end("Authorization request failed.");
+          method: "POST",
+
+          headers: {
+
+            "Content-Type": "application/x-www-form-urlencoded"
+
+          },
+
+          body: new URLSearchParams({
+
+            client_id: CLIENT_ID,
+
+            client_secret: CLIENT_SECRET,
+
+            code,
+
+            grant_type: "authorization_code",
+
+            redirect_uri: REDIRECT_URI
+
+          })
+
+        }
+
+      );
+
+      const tokens = await tokenResponse.json();
+
+      if (!tokenResponse.ok) {
+
+        return sendJson(res, tokenResponse.status, {
+
+          error: "Token exchange failed",
+
+          details: tokens.error_description || tokens.error
+
+        });
+
+      }
+
+      accessToken = tokens.access_token;
+
+      if (tokens.refresh_token) {
+
+        refreshToken = tokens.refresh_token;
+
+      }
+
+      res.writeHead(200, {
+
+        "Content-Type": "text/html"
+
+      });
+
+      return res.end(`
+
+        <html>
+
+          <body style="font-family:Arial;text-align:center;padding:50px">
+
+            <h2>NestView TV Connected</h2>
+
+            <p>Google Nest authorization succeeded.</p>
+
+            <p>Your cameras are ready to be checked.</p>
+
+          </body>
+
+        </html>
+
+      `);
+
+    }
+
+    if (url.pathname === "/devices") {
+
+      let token = accessToken;
+
+      if (!token) {
+
+        token = await getAccessToken();
+
+      }
+
+      let response = await fetch(
+
+        `https://smartdevicemanagement.googleapis.com/v1/enterprises/${PROJECT_ID}/devices`,
+
+        {
+
+          headers: {
+
+            Authorization: `Bearer ${token}`
+
+          }
+
+        }
+
+      );
+
+      if (response.status === 401 && refreshToken) {
+
+        token = await getAccessToken();
+
+        response = await fetch(
+
+          `https://smartdevicemanagement.googleapis.com/v1/enterprises/${PROJECT_ID}/devices`,
+
+          {
+
+            headers: {
+
+              Authorization: `Bearer ${token}`
+
+            }
+
+          }
+
+        );
+
+      }
+
+      const data = await response.json();
+
+      if (!response.ok) {
+
+        return sendJson(res, response.status, data);
+
+      }
+
+      return sendJson(res, 200, data);
+
+    }
+
+    return sendJson(res, 404, {
+
+      error: "Not found"
 
     });
 
-    request.write(body);
+  } catch (error) {
 
-    request.end();
+    return sendJson(res, 500, {
 
-    return;
+      error: error.message
+
+    });
 
   }
-
-  res.writeHead(404, { "Content-Type": "application/json" });
-
-  res.end(JSON.stringify({ error: "Not found" }));
 
 });
 
