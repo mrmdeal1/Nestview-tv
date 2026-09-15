@@ -239,7 +239,7 @@ async function getAccessToken() {
 }
 
 const server = http.createServer(async (req, res) => {
-
+console.log("REQUEST:", req.method, req.url);
   const host = req.headers.host || "nestview-tv.onrender.com";
 
   const url = new URL(req.url, "https://" + host);
