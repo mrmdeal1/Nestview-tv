@@ -141,7 +141,65 @@ function googleGet(path, token) {
   });
 
 }
+function googlePost(path, token, bodyObject) {
 
+  return new Promise((resolve, reject) => {
+
+    const body = JSON.stringify(bodyObject);
+
+    const options = {
+
+      hostname: "smartdevicemanagement.googleapis.com",
+
+      path: path,
+
+      method: "POST",
+
+      headers: {
+
+        Authorization: "Bearer " + token,
+
+        "Content-Type": "application/json",
+
+        "Content-Length": Buffer.byteLength(body)
+
+      }
+
+    };
+
+    const request = https.request(options, response => {
+
+      let data = "";
+
+      response.on("data", chunk => {
+
+        data += chunk;
+
+      });
+
+      response.on("end", () => {
+
+        resolve({
+
+          status: response.statusCode,
+
+          data: data
+
+        });
+
+      });
+
+    });
+
+    request.on("error", reject);
+
+    request.write(body);
+
+    request.end();
+
+  });
+
+}
 async function getAccessToken() {
 
   if (refreshToken) {
