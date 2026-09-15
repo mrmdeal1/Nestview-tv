@@ -725,27 +725,33 @@ startButton.addEventListener("click", async function () {
 
     const peer = new RTCPeerConnection();
 
-    peer.addTransceiver("video", {
-
-      direction: "recvonly"
-
-    });
-
+    
     peer.addTransceiver("audio", {
 
-      direction: "recvonly"
+  direction: "recvonly"
 
-    });
+});
 
-    peer.ontrack = function (event) {
+peer.addTransceiver("video", {
 
-      if (event.streams && event.streams[0]) {
+  direction: "recvonly"
 
-        video.srcObject = event.streams[0];
+});
 
-      }
+peer.createDataChannel("dataSendChannel");
 
-    };
+peer.ontrack = function (event) {
+
+  if (event.streams && event.streams[0]) {
+
+    video.srcObject = event.streams[0];
+
+  }
+
+};
+      
+
+
 
     const offer = await peer.createOffer();
 
