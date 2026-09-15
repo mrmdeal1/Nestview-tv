@@ -72,9 +72,17 @@ async function getAccessToken() {
 
   if (!response.ok) {
 
+    console.log("Google refresh error:", {
+
+      error: data.error,
+
+      error_description: data.error_description
+
+    });
+
     throw new Error(
 
-      data.error_description || "Could not refresh Google access token."
+      data.error_description || data.error || "Could not refresh Google access token."
 
     );
 
@@ -144,7 +152,7 @@ const server = http.createServer(async (req, res) => {
 
       const authUrl =
 
-        `https://nestservices.google.com/partnerconnections/${PROJECT_ID}/auth?${params}`;
+        `https://nestservices.google.com/partnerconnections/${PROJECT_ID}/auth?${params.toString()}`;
 
       res.writeHead(302, {
 
@@ -190,7 +198,7 @@ const server = http.createServer(async (req, res) => {
 
             client_secret: CLIENT_SECRET,
 
-            code,
+            code: code,
 
             grant_type: "authorization_code",
 
@@ -206,11 +214,21 @@ const server = http.createServer(async (req, res) => {
 
       if (!tokenResponse.ok) {
 
+        console.log("Google token exchange error:", {
+
+          error: tokens.error,
+
+          error_description: tokens.error_description
+
+        });
+
         return sendJson(res, tokenResponse.status, {
 
           error: "Token exchange failed",
 
-          details: tokens.error_description || tokens.error
+          google_error: tokens.error,
+
+          details: tokens.error_description
 
         });
 
@@ -224,6 +242,8 @@ const server = http.createServer(async (req, res) => {
 
       }
 
+      console.log("Google Nest authorization succeeded.");
+
       res.writeHead(200, {
 
         "Content-Type": "text/html"
@@ -233,6 +253,12 @@ const server = http.createServer(async (req, res) => {
       return res.end(`
 
         <html>
+
+          <head>
+
+            <meta name="viewport" content="width=device-width, initial-scale=1">
+
+          </head>
 
           <body style="font-family:Arial;text-align:center;padding:50px">
 
@@ -302,6 +328,14 @@ const server = http.createServer(async (req, res) => {
 
       if (!response.ok) {
 
+        console.log("Google SDM devices error:", {
+
+          status: response.status,
+
+          error: data.error
+
+        });
+
         return sendJson(res, response.status, data);
 
       }
@@ -318,18 +352,6 @@ const server = http.createServer(async (req, res) => {
 
   } catch (error) {
 
-    return sendJson(res, 500, {
+    console.error("NestView server error:", error.message);
 
-      error: error.message
-
-    });
-
-  }
-
-});
-
-server.listen(PORT, "0.0.0.0", () => {
-
-  console.log(`NestView TV server running on port ${PORT}`);
-
-});
+    
