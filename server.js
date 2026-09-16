@@ -44,7 +44,7 @@ function postForm(hostname, path, formData) {
 
       path: path,
 
-      method: "POST",w
+      method: "POST",
 
       headers: {
 
