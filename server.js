@@ -708,6 +708,7 @@ const cameraName = document.getElementById("cameraName");
 let cameras = [];
 
 let currentCameraIndex = 0;
+let activePeer = null;
 startButton.addEventListener("click", async function () {
 
   startButton.disabled = true;
@@ -741,9 +742,14 @@ const camera = cameras[currentCameraIndex];
 
 cameraName.textContent = "Camera " + (currentCameraIndex + 1) + " of " + cameras.length;
     statusText.textContent = "Starting live camera...";
+if (activePeer) {
 
+  activePeer.close();
+
+  activePeer = null;
+}
     const peer = new RTCPeerConnection();
-
+activePeer = peer;
     
     peer.addTransceiver("audio", {
 
