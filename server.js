@@ -682,6 +682,15 @@ console.log("REQUEST:", req.method, req.url);
   Start Camera
 
 </button>
+<div style="margin-top:18px;">
+
+  <button id="prevButton" style="font-size:20px;padding:12px 20px;">Previous</button>
+
+  <span id="cameraName" style="margin:0 15px;font-size:20px;">Camera 1</span>
+
+  <button id="nextButton" style="font-size:20px;padding:12px 20px;">Next</button>
+
+</div>
 
 <script>
 
@@ -690,7 +699,15 @@ const startButton = document.getElementById("startButton");
 const statusText = document.getElementById("status");
 
 const video = document.getElementById("camera");
+const prevButton = document.getElementById("prevButton");
 
+const nextButton = document.getElementById("nextButton");
+
+const cameraName = document.getElementById("cameraName");
+
+let cameras = [];
+
+let currentCameraIndex = 0;
 startButton.addEventListener("click", async function () {
 
   startButton.disabled = true;
@@ -708,7 +725,6 @@ startButton.addEventListener("click", async function () {
       throw new Error("No cameras found.");
 
     }
-
     const camera = devicesData.devices.find(function (device) {
 
       return device.type === "sdm.devices.types.CAMERA";
