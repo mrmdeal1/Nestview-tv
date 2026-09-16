@@ -44,7 +44,7 @@ function postForm(hostname, path, formData) {
 
       path: path,
 
-      method: "POST",
+      method: "POST",w
 
       headers: {
 
@@ -725,18 +725,21 @@ startButton.addEventListener("click", async function () {
       throw new Error("No cameras found.");
 
     }
-    const camera = devicesData.devices.find(function (device) {
+    cameras = devicesData.devices.filter(function (device) {
 
-      return device.type === "sdm.devices.types.CAMERA";
+  return device.type === "sdm.devices.types.CAMERA";
 
-    });
+});
 
-    if (!camera) {
+if (cameras.length === 0) {
 
-      throw new Error("No compatible camera found.");
+  throw new Error("No compatible cameras found.");
 
-    }
+}
 
+const camera = cameras[currentCameraIndex];
+
+cameraName.textContent = "Camera " + (currentCameraIndex + 1) + " of " + cameras.length;
     statusText.textContent = "Starting live camera...";
 
     const peer = new RTCPeerConnection();
