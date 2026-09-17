@@ -406,7 +406,29 @@ if (url.pathname === "/token-status") {
 console.log("REFRESH_TOKEN_CAPTURED"); 
         
       }
+if (url.pathname === "/save-refresh-token") {
 
+  if (!refreshToken) {
+
+    sendJson(res, 404, { error: "No refresh token loaded" });
+
+    return;
+
+  }
+
+  res.writeHead(200, {
+
+    "Content-Type": "text/plain",
+
+    "Cache-Control": "no-store"
+
+  });
+
+  res.end(refreshToken);
+
+  return;
+
+}
       res.writeHead(200, {
 
         "Content-Type": "text/html"
