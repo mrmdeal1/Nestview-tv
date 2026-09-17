@@ -16,7 +16,7 @@ const REDIRECT_URI =
 
 let accessToken = null;
 
-let refreshToken = null;
+let refreshToken = process.env.GOOGLE_REFRESH_TOKEN || null;
 
 function sendJson(res, status, data) {
 
