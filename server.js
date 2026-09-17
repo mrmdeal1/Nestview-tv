@@ -945,7 +945,7 @@ patrolButton.addEventListener("click", function () {
 
   });
 
-});
+};
 
 server.listen(PORT, "0.0.0.0", () => {
 
