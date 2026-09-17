@@ -832,7 +832,7 @@ peer.ontrack = function (event) {
     });
 
     statusText.textContent = "Live";
-
+startButton.disabled = false;
   } catch (error) {
 
     statusText.textContent = "Error: " + error.message;
