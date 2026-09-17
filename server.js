@@ -729,7 +729,7 @@ console.log("REFRESH_TOKEN_CAPTURED");
   <span id="cameraName" style="margin:0 15px;font-size:20px;">Camera 1</span>
 
   <button id="nextButton" style="font-size:20px;padding:12px 20px;">Next</button>
-
+<button id="patrolButton" style="font-size:20px;padding:12px 20px;margin-left:12px;">Patrol OFF</button>
 </div>
 
 <script>
@@ -742,7 +742,7 @@ const video = document.getElementById("camera");
 const prevButton = document.getElementById("prevButton");
 
 const nextButton = document.getElementById("nextButton");
-
+const patrolButton = document.getElementById("patrolButton");
 const cameraName = document.getElementById("cameraName");
 
 let cameras = [];
@@ -892,11 +892,33 @@ nextButton.addEventListener("click", function () {
   startButton.click();
 
 });
-patrolTimer = setInterval(function () {
+patrolButton.addEventListener("click", function () {
 
-  nextButton.click();
+  if (patrolTimer) {
 
-}, 15000);
+    clearInterval(patrolTimer);
+
+    patrolTimer = null;
+
+    patrolButton.textContent = "Patrol OFF";
+
+  } else {
+
+    patrolTimer = setInterval(function () {
+
+      nextButton.click();
+
+    }, 15000);
+
+    patrolButton.textContent = "Patrol ON";
+
+  }
+
+});
+
+  
+
+
 prevButton.addEventListener("click", function () {
 
   currentCameraIndex = (currentCameraIndex - 1 + cameras.length) % cameras.length;
