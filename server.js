@@ -406,7 +406,10 @@ if (url.pathname === "/token-status") {
 console.log("REFRESH_TOKEN_CAPTURED"); 
         
       }
-if (url.pathname === "/save-refresh-token") {
+return;
+
+}
+    if (url.pathname === "/save-refresh-token") {
 
   if (!refreshToken) {
 
