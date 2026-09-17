@@ -669,7 +669,7 @@ console.log("REFRESH_TOKEN_CAPTURED");
 
     }
 
-  }if (url.pathname === "/viewer") {
+  if (url.pathname === "/viewer") {
 
     res.writeHead(200, {
 
