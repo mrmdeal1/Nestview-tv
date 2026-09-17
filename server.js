@@ -741,6 +741,13 @@ if (cameras.length === 0) {
 const camera = cameras[currentCameraIndex];
 
 cameraName.textContent = "Camera " + (currentCameraIndex + 1) + " of " + cameras.length;
+if (video.srcObject) {
+
+  video.srcObject.getTracks().forEach(track => track.stop());
+
+  video.srcObject = null;
+
+}
     statusText.textContent = "Starting live camera...";
 if (activePeer) {
 
