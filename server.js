@@ -261,7 +261,19 @@ console.log("REQUEST:", req.method, req.url);
     return;
 
   }
+if (url.pathname === "/token-status") {
 
+  sendJson(res, 200, {
+
+    refreshTokenLoaded: !!refreshToken,
+
+    accessTokenLoaded: !!accessToken
+
+  });
+
+  return;
+
+}
   if (url.pathname === "/health") {
 
     sendJson(res, 200, {
