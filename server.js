@@ -919,15 +919,15 @@ patrolButton.addEventListener("click", function () {
   
 
 
-prevButton.addEventListener("click", function () {
 
-  currentCameraIndex = (currentCameraIndex - 1 + cameras.length) % cameras.length;
 
-  cameraName.textContent = "Camera " + (currentCameraIndex + 1);
+  
 
-  startButton.click();
+  
 
-});
+  
+
+
 </script>
 
         </body>
