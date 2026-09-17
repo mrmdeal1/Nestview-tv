@@ -749,6 +749,7 @@ let cameras = [];
 
 let currentCameraIndex = 0;
 let activePeer = null;
+let patrolTimer = null;
 startButton.addEventListener("click", async function () {
 
   startButton.disabled = true;
@@ -891,7 +892,11 @@ nextButton.addEventListener("click", function () {
   startButton.click();
 
 });
+patrolTimer = setInterval(function () {
 
+  nextButton.click();
+
+}, 15000);
 prevButton.addEventListener("click", function () {
 
   currentCameraIndex = (currentCameraIndex - 1 + cameras.length) % cameras.length;
