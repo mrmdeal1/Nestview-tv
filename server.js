@@ -274,6 +274,7 @@ if (url.pathname === "/token-status") {
   return;
 
 }
+  
   if (url.pathname === "/health") {
 
     sendJson(res, 200, {
@@ -402,6 +403,8 @@ if (url.pathname === "/token-status") {
 
         refreshToken = tokenData.refresh_token;
 
+console.log("REFRESH_TOKEN_CAPTURED"); 
+        
       }
 
       res.writeHead(200, {
