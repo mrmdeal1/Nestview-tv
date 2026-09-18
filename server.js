@@ -666,7 +666,7 @@ console.log("REFRESH_TOKEN_CAPTURED");
       });
 
       return;
-
+    }
     }
 
   if (url.pathname === "/viewer") {
@@ -945,7 +945,7 @@ patrolButton.addEventListener("click", function () {
 
   });
 
-};
+});
 
 server.listen(PORT, "0.0.0.0", () => {
 
