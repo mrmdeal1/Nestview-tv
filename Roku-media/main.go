@@ -156,9 +156,11 @@ func startCamera(camera Camera) (string, error) {
 	err := mediaEngine.RegisterCodec(
 		webrtc.RTPCodecParameters{
 			RTPCodecCapability: webrtc.RTPCodecCapability{
-				MimeType:    webrtc.MimeTypeH264,
-				ClockRate:   90000,
-				SDPFmtpLine: "level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=42e01f",
+				MimeType:  webrtc.MimeTypeH264,
+				ClockRate: 90000,
+				SDPFmtpLine: "level-asymmetry-allowed=1;" +
+					"packetization-mode=1;" +
+					"profile-level-id=42e01f",
 			},
 			PayloadType: 102,
 		},
@@ -248,6 +250,7 @@ func startCamera(camera Camera) (string, error) {
 	}
 
 	var result map[string]interface{}
+
 	if err := json.Unmarshal(body, &result); err != nil {
 		return "", err
 	}
@@ -280,7 +283,10 @@ func startCamera(camera Camera) (string, error) {
 	return answer, nil
 }
 
-func health(w http.ResponseWriter, r *http.Request) {
+func health(
+	w http.ResponseWriter,
+	r *http.Request,
+) {
 	writeJSON(w, 200, map[string]interface{}{
 		"status":  "ok",
 		"bridge":  "pion-h264",
@@ -288,7 +294,10 @@ func health(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func start(w http.ResponseWriter, r *http.Request) {
+func start(
+	w http.ResponseWriter,
+	r *http.Request,
+) {
 	if r.Method != http.MethodPost {
 		writeJSON(w, 405, map[string]string{
 			"error": "POST required",
@@ -296,16 +305,31 @@ func start(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	body, err := io.ReadAll(r.Body)
+
+	if err != nil {
+		writeJSON(w, 400, map[string]string{
+			"error": "could not read request body",
+		})
+		return
+	}
+
+	log.Printf(
+		"Shortcut body: %q",
+		string(body),
+	)
+
 	var request StartRequest
 
-	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+	if err := json.Unmarshal(body, &request); err != nil {
 		writeJSON(w, 400, map[string]string{
-			"error": "invalid JSON",
+			"error": "invalid JSON: " + err.Error(),
 		})
 		return
 	}
 
 	cameras, err := getCameras()
+
 	if err != nil {
 		writeJSON(w, 502, map[string]string{
 			"error": err.Error(),
@@ -313,7 +337,8 @@ func start(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if request.Camera < 0 || request.Camera >= len(cameras) {
+	if request.Camera < 0 ||
+		request.Camera >= len(cameras) {
 		writeJSON(w, 400, map[string]string{
 			"error": "invalid camera index",
 		})
@@ -329,8 +354,12 @@ func start(w http.ResponseWriter, r *http.Request) {
 	)
 
 	_, err = startCamera(camera)
+
 	if err != nil {
-		log.Println("Camera start failed:", err)
+		log.Println(
+			"Camera start failed:",
+			err,
+		)
 
 		writeJSON(w, 502, map[string]string{
 			"error": err.Error(),
@@ -347,30 +376,47 @@ func start(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
-	http.HandleFunc("/health", health)
-	http.HandleFunc("/start", start)
+	http.HandleFunc(
+		"/health",
+		health,
+	)
 
-	http.HandleFunc("/", func(
-		w http.ResponseWriter,
-		r *http.Request,
-	) {
-				writeJSON(w, 200, map[string]interface{}{
-			"name":    "NestView TV Roku Media Bridge",
-			"engine":  "Pion WebRTC",
-			"h264":    true,
-			"version": 3,
-		})
-	})
+	http.HandleFunc(
+		"/start",
+		start,
+	)
+
+	http.HandleFunc(
+		"/",
+		func(
+			w http.ResponseWriter,
+			r *http.Request,
+		) {
+			writeJSON(
+				w,
+				200,
+				map[string]interface{}{
+					"name": "NestView TV Roku Media Bridge",
+					"engine": "Pion WebRTC",
+					"h264": true,
+					"version": 3,
+				},
+			)
+		},
+	)
+
 	log.Println(
-		"NestView TV Pion H264 Bridge VERSION 3 running on port " +
-			port,
-	)
-	log.Fatal(
-		http.ListenAndServe(":"+port, nil),
+		"NestView TV Pion H264 Bridge VERSION 3 " +
+			"running on port " + port,
 	)
 
+	log.Fatal(
+		http.ListenAndServe(
+			":"+port,
+			nil,
+		),
+	)
 }
 
 // Keep strconv referenced for future camera parameters.
-
 var _ = strconv.Itoa
