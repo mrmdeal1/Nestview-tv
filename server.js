@@ -818,7 +818,7 @@ if (cameras.length === 0) {
 
 const camera = cameras[currentCameraIndex];
 
-cameraName.textContent = "Camera " + (currentCameraIndex + 1) + " of " + cameras.length;
+cameraName.textContent = camera.traits["sdm.devices.traits.Info"].customName + " (" + (currentCameraIndex + 1) + " of " + cameras.length + ")";
 if (video.srcObject) {
 
   video.srcObject.getTracks().forEach(track => track.stop());
