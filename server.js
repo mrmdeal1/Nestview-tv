@@ -756,6 +756,17 @@ console.log("REFRESH_TOKEN_CAPTURED");
 
   <button id="nextButton" style="font-size:20px;padding:12px 20px;">Next</button>
 <button id="patrolButton" style="font-size:20px;padding:12px 20px;margin-left:12px;">Patrol OFF</button>
+<select id="patrolSpeed" style="font-size:20px;padding:12px;margin-left:12px;">
+
+  <option value="10000">10 sec</option>
+
+  <option value="15000" selected>15 sec</option>
+
+  <option value="30000">30 sec</option>
+
+  <option value="60000">60 sec</option>
+
+</select>
 </div>
 
 <script>
@@ -934,7 +945,7 @@ patrolButton.addEventListener("click", function () {
 
       nextButton.click();
 
-    }, 15000);
+    }, CTNumber(document.getElementById("patrolSpeed").value) );
 
     patrolButton.textContent = "Patrol ON";
 
