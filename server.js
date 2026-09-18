@@ -945,7 +945,7 @@ patrolButton.addEventListener("click", function () {
 
       nextButton.click();
 
-    }, CTNumber(document.getElementById("patrolSpeed").value) );
+    }, Number(document.getElementById("patrolSpeed").value) );
 
     patrolButton.textContent = "Patrol ON";
 
