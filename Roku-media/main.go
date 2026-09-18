@@ -9,14 +9,22 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/pion/webrtc/v4"
 )
 
 var (
-	nestBackend = env("NEST_BACKEND", "https://nestview-tv.onrender.com")
-	port        = env("PORT", "10000")
+	nestBackend = env(
+		"NEST_BACKEND",
+		"https://nestview-tv.onrender.com",
+	)
+
+	port = env(
+		"PORT",
+		"10000",
+	)
 )
 
 type Camera struct {
@@ -24,32 +32,56 @@ type Camera struct {
 	Name   string `json:"name"`
 }
 
+type MediaStats struct {
+	VideoPackets uint64
+	VideoBytes   uint64
+	AudioPackets uint64
+	AudioBytes   uint64
+}
+
 func env(key, fallback string) string {
 	if value := os.Getenv(key); value != "" {
 		return value
 	}
+
 	return fallback
 }
 
-func writeJSON(w http.ResponseWriter, status int, value interface{}) {
-	w.Header().Set("Content-Type", "application/json")
+func writeJSON(
+	w http.ResponseWriter,
+	status int,
+	value interface{},
+) {
+	w.Header().Set(
+		"Content-Type",
+		"application/json",
+	)
+
 	w.WriteHeader(status)
+
 	_ = json.NewEncoder(w).Encode(value)
 }
 
 func getCameras() ([]Camera, error) {
-	resp, err := http.Get(nestBackend + "/api/cameras")
+	resp, err := http.Get(
+		nestBackend + "/api/cameras",
+	)
+
 	if err != nil {
 		return nil, err
 	}
+
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
+
 	if err != nil {
 		return nil, err
 	}
 
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+	if resp.StatusCode < 200 ||
+		resp.StatusCode >= 300 {
+
 		return nil, fmt.Errorf(
 			"camera backend returned %d: %s",
 			resp.StatusCode,
@@ -59,23 +91,31 @@ func getCameras() ([]Camera, error) {
 
 	var raw interface{}
 
-	if err := json.Unmarshal(body, &raw); err != nil {
+	if err := json.Unmarshal(
+		body,
+		&raw,
+	); err != nil {
 		return nil, err
 	}
 
 	var list []interface{}
 
 	switch value := raw.(type) {
+
 	case []interface{}:
 		list = value
 
 	case map[string]interface{}:
+
 		for _, key := range []string{
 			"cameras",
 			"devices",
 			"results",
 		} {
-			if candidate, ok := value[key].([]interface{}); ok {
+
+			if candidate, ok :=
+				value[key].([]interface{}); ok {
+
 				list = candidate
 				break
 			}
@@ -85,7 +125,10 @@ func getCameras() ([]Camera, error) {
 	var cameras []Camera
 
 	for _, item := range list {
-		m, ok := item.(map[string]interface{})
+
+		m, ok :=
+			item.(map[string]interface{})
+
 		if !ok {
 			continue
 		}
@@ -110,7 +153,10 @@ func getCameras() ([]Camera, error) {
 			label = "Camera"
 		}
 
-		if strings.Contains(device, "/devices/") {
+		if strings.Contains(
+			device,
+			"/devices/",
+		) {
 			cameras = append(
 				cameras,
 				Camera{
@@ -122,7 +168,9 @@ func getCameras() ([]Camera, error) {
 	}
 
 	if len(cameras) == 0 {
-		return nil, fmt.Errorf("no cameras found")
+		return nil, fmt.Errorf(
+			"no cameras found",
+		)
 	}
 
 	return cameras, nil
@@ -132,8 +180,13 @@ func firstString(
 	m map[string]interface{},
 	keys ...string,
 ) string {
+
 	for _, key := range keys {
-		if value, ok := m[key].(string); ok && value != "" {
+
+		if value, ok :=
+			m[key].(string); ok &&
+			value != "" {
+
 			return value
 		}
 	}
@@ -141,19 +194,31 @@ func firstString(
 	return ""
 }
 
-func findAnswerSDP(value interface{}) string {
+func findAnswerSDP(
+	value interface{},
+) string {
+
 	switch v := value.(type) {
 
 	case map[string]interface{}:
+
 		for key, item := range v {
-			lowerKey := strings.ToLower(key)
+
+			lowerKey :=
+				strings.ToLower(key)
 
 			if lowerKey == "answersdp" ||
 				lowerKey == "answer_sdp" ||
 				lowerKey == "answer" ||
 				lowerKey == "sdp" {
-				if text, ok := item.(string); ok {
-					if strings.Contains(text, "v=0") {
+
+				if text, ok :=
+					item.(string); ok {
+
+					if strings.Contains(
+						text,
+						"v=0",
+					) {
 						return text
 					}
 				}
@@ -161,21 +226,35 @@ func findAnswerSDP(value interface{}) string {
 		}
 
 		for _, item := range v {
-			if answer := findAnswerSDP(item); answer != "" {
+
+			if answer :=
+				findAnswerSDP(item);
+				answer != "" {
+
 				return answer
 			}
 		}
 
 	case []interface{}:
+
 		for _, item := range v {
-			if answer := findAnswerSDP(item); answer != "" {
+
+			if answer :=
+				findAnswerSDP(item);
+				answer != "" {
+
 				return answer
 			}
 		}
 
 	case string:
+
 		if strings.Contains(v, "v=0") &&
-			strings.Contains(v, "m=video") {
+			strings.Contains(
+				v,
+				"m=video",
+			) {
+
 			return v
 		}
 	}
@@ -183,114 +262,286 @@ func findAnswerSDP(value interface{}) string {
 	return ""
 }
 
-func waitForICE(pc *webrtc.PeerConnection) {
-	done := webrtc.GatheringCompletePromise(pc)
+func waitForICE(
+	pc *webrtc.PeerConnection,
+) {
+	done :=
+		webrtc.GatheringCompletePromise(
+			pc,
+		)
 
 	select {
+
 	case <-done:
-	case <-time.After(10 * time.Second):
+
+	case <-time.After(
+		10 * time.Second,
+	):
 	}
 }
 
-func startCamera(camera Camera) (string, error) {
-	mediaEngine := &webrtc.MediaEngine{}
+func startCamera(
+	camera Camera,
+) (*MediaStats, error) {
+
+	mediaEngine :=
+		&webrtc.MediaEngine{}
 
 	err := mediaEngine.RegisterCodec(
 		webrtc.RTPCodecParameters{
-			RTPCodecCapability: webrtc.RTPCodecCapability{
-				MimeType:  webrtc.MimeTypeOpus,
-				ClockRate: 48000,
-				Channels:  2,
-			},
+			RTPCodecCapability:
+				webrtc.RTPCodecCapability{
+					MimeType:
+						webrtc.MimeTypeOpus,
+					ClockRate: 48000,
+					Channels:  2,
+				},
 			PayloadType: 111,
 		},
 		webrtc.RTPCodecTypeAudio,
 	)
+
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
 	err = mediaEngine.RegisterCodec(
 		webrtc.RTPCodecParameters{
-			RTPCodecCapability: webrtc.RTPCodecCapability{
-				MimeType:  webrtc.MimeTypeH264,
-				ClockRate: 90000,
-				SDPFmtpLine: "level-asymmetry-allowed=1;" +
-					"packetization-mode=1;" +
-					"profile-level-id=42e01f",
-			},
+			RTPCodecCapability:
+				webrtc.RTPCodecCapability{
+					MimeType:
+						webrtc.MimeTypeH264,
+					ClockRate: 90000,
+					SDPFmtpLine:
+						"level-asymmetry-allowed=1;" +
+							"packetization-mode=1;" +
+							"profile-level-id=42e01f",
+				},
 			PayloadType: 102,
 		},
 		webrtc.RTPCodecTypeVideo,
 	)
+
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
 	api := webrtc.NewAPI(
-		webrtc.WithMediaEngine(mediaEngine),
+		webrtc.WithMediaEngine(
+			mediaEngine,
+		),
 	)
 
-	pc, err := api.NewPeerConnection(
-		webrtc.Configuration{},
-	)
+	pc, err :=
+		api.NewPeerConnection(
+			webrtc.Configuration{},
+		)
+
 	if err != nil {
-		return "", err
+		return nil, err
 	}
+
 	defer pc.Close()
 
-	_, err = pc.AddTransceiverFromKind(
-		webrtc.RTPCodecTypeAudio,
-		webrtc.RTPTransceiverInit{
-			Direction: webrtc.RTPTransceiverDirectionRecvonly,
+	stats := &MediaStats{}
+
+	videoSeen :=
+		make(chan struct{}, 1)
+
+	audioSeen :=
+		make(chan struct{}, 1)
+
+	pc.OnConnectionStateChange(
+		func(
+			state webrtc.PeerConnectionState,
+		) {
+			log.Printf(
+				"WebRTC connection state: %s",
+				state.String(),
+			)
 		},
 	)
-	if err != nil {
-		return "", err
-	}
 
-	_, err = pc.AddTransceiverFromKind(
-		webrtc.RTPCodecTypeVideo,
-		webrtc.RTPTransceiverInit{
-			Direction: webrtc.RTPTransceiverDirectionRecvonly,
+	pc.OnTrack(
+		func(
+			track *webrtc.TrackRemote,
+			receiver *webrtc.RTPReceiver,
+		) {
+
+			codec :=
+				track.Codec()
+
+			log.Printf(
+				"Incoming track: kind=%s codec=%s payload=%d",
+				track.Kind().String(),
+				codec.MimeType,
+				codec.PayloadType,
+			)
+
+			if track.Kind() ==
+				webrtc.RTPCodecTypeVideo {
+
+				select {
+				case videoSeen <- struct{}{}:
+				default:
+				}
+
+				go func() {
+
+					for {
+						packet, _, err :=
+							track.ReadRTP()
+
+						if err != nil {
+							log.Println(
+								"Video RTP ended:",
+								err,
+							)
+							return
+						}
+
+						packets :=
+							atomic.AddUint64(
+								&stats.VideoPackets,
+								1,
+							)
+
+						bytes :=
+							atomic.AddUint64(
+								&stats.VideoBytes,
+								uint64(
+									len(
+										packet.Payload,
+									),
+								),
+							)
+
+						if packets == 1 ||
+							packets%100 == 0 {
+
+							log.Printf(
+								"H264 RTP received: packets=%d bytes=%d",
+								packets,
+								bytes,
+							)
+						}
+					}
+				}()
+			}
+
+			if track.Kind() ==
+				webrtc.RTPCodecTypeAudio {
+
+				select {
+				case audioSeen <- struct{}{}:
+				default:
+				}
+
+				go func() {
+
+					for {
+						packet, _, err :=
+							track.ReadRTP()
+
+						if err != nil {
+							log.Println(
+								"Audio RTP ended:",
+								err,
+							)
+							return
+						}
+
+						atomic.AddUint64(
+							&stats.AudioPackets,
+							1,
+						)
+
+						atomic.AddUint64(
+							&stats.AudioBytes,
+							uint64(
+								len(
+									packet.Payload,
+								),
+							),
+						)
+					}
+				}()
+			}
 		},
 	)
+
+	_, err =
+		pc.AddTransceiverFromKind(
+			webrtc.RTPCodecTypeAudio,
+			webrtc.RTPTransceiverInit{
+				Direction:
+					webrtc.RTPTransceiverDirectionRecvonly,
+			},
+		)
+
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
-	_, err = pc.CreateDataChannel(
-		"nestview",
-		nil,
-	)
+	_, err =
+		pc.AddTransceiverFromKind(
+			webrtc.RTPCodecTypeVideo,
+			webrtc.RTPTransceiverInit{
+				Direction:
+					webrtc.RTPTransceiverDirectionRecvonly,
+			},
+		)
+
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
-	offer, err := pc.CreateOffer(nil)
+	_, err =
+		pc.CreateDataChannel(
+			"nestview",
+			nil,
+		)
+
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
-	if err = pc.SetLocalDescription(offer); err != nil {
-		return "", err
+	offer, err :=
+		pc.CreateOffer(nil)
+
+	if err != nil {
+		return nil, err
+	}
+
+	if err =
+		pc.SetLocalDescription(
+			offer,
+		); err != nil {
+
+		return nil, err
 	}
 
 	waitForICE(pc)
 
-	local := pc.LocalDescription()
+	local :=
+		pc.LocalDescription()
 
 	if local == nil {
-		return "", fmt.Errorf("local SDP missing")
+		return nil, fmt.Errorf(
+			"local SDP missing",
+		)
 	}
 
-	upperSDP := strings.ToUpper(local.SDP)
+	upperSDP :=
+		strings.ToUpper(
+			local.SDP,
+		)
 
 	if !strings.Contains(
 		upperSDP,
 		"OPUS/48000",
 	) {
-		return "", fmt.Errorf(
+		return nil, fmt.Errorf(
 			"generated SDP does not contain OPUS/48000",
 		)
 	}
@@ -299,36 +550,42 @@ func startCamera(camera Camera) (string, error) {
 		upperSDP,
 		"H264/90000",
 	) {
-		return "", fmt.Errorf(
+		return nil, fmt.Errorf(
 			"generated SDP does not contain H264/90000",
 		)
 	}
 
-	audioPos := strings.Index(
-		local.SDP,
-		"m=audio",
-	)
+	audioPos :=
+		strings.Index(
+			local.SDP,
+			"m=audio",
+		)
 
-	videoPos := strings.Index(
-		local.SDP,
-		"m=video",
-	)
+	videoPos :=
+		strings.Index(
+			local.SDP,
+			"m=video",
+		)
 
-	appPos := strings.Index(
-		local.SDP,
-		"m=application",
-	)
+	appPos :=
+		strings.Index(
+			local.SDP,
+			"m=application",
+		)
 
 	if audioPos == -1 ||
 		videoPos == -1 ||
 		appPos == -1 {
-		return "", fmt.Errorf(
+
+		return nil, fmt.Errorf(
 			"SDP missing audio, video, or application m-line",
 		)
 	}
 
-	if !(audioPos < videoPos && videoPos < appPos) {
-		return "", fmt.Errorf(
+	if !(audioPos < videoPos &&
+		videoPos < appPos) {
+
+		return nil, fmt.Errorf(
 			"SDP order is not audio-video-application",
 		)
 	}
@@ -345,33 +602,40 @@ func startCamera(camera Camera) (string, error) {
 		"SDP order confirmed: audio -> video -> application",
 	)
 
-	payload := map[string]string{
-		"device":   camera.Device,
-		"offerSdp": local.SDP,
-	}
+	payload :=
+		map[string]string{
+			"device":
+				camera.Device,
+			"offerSdp":
+				local.SDP,
+		}
 
-	data, err := json.Marshal(payload)
-
-	if err != nil {
-		return "", err
-	}
-
-	resp, err := http.Post(
-		nestBackend+"/api/webrtc",
-		"application/json",
-		bytes.NewReader(data),
-	)
+	data, err :=
+		json.Marshal(payload)
 
 	if err != nil {
-		return "", err
+		return nil, err
+	}
+
+	resp, err :=
+		http.Post(
+			nestBackend+
+				"/api/webrtc",
+			"application/json",
+			bytes.NewReader(data),
+		)
+
+	if err != nil {
+		return nil, err
 	}
 
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
+	body, err :=
+		io.ReadAll(resp.Body)
 
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
 	log.Printf(
@@ -379,14 +643,10 @@ func startCamera(camera Camera) (string, error) {
 		resp.StatusCode,
 	)
 
-	log.Printf(
-		"Nest backend response body: %s",
-		string(body),
-	)
-
 	if resp.StatusCode < 200 ||
 		resp.StatusCode >= 300 {
-		return "", fmt.Errorf(
+
+		return nil, fmt.Errorf(
 			"Nest backend returned %d: %s",
 			resp.StatusCode,
 			string(body),
@@ -395,20 +655,23 @@ func startCamera(camera Camera) (string, error) {
 
 	var result interface{}
 
-	if err := json.Unmarshal(
-		body,
-		&result,
-	); err != nil {
-		return "", fmt.Errorf(
+	if err :=
+		json.Unmarshal(
+			body,
+			&result,
+		); err != nil {
+
+		return nil, fmt.Errorf(
 			"could not decode Nest response: %w",
 			err,
 		)
 	}
 
-	answer := findAnswerSDP(result)
+	answer :=
+		findAnswerSDP(result)
 
 	if answer == "" {
-		return "", fmt.Errorf(
+		return nil, fmt.Errorf(
 			"Nest response did not contain recognizable answer SDP",
 		)
 	}
@@ -417,22 +680,93 @@ func startCamera(camera Camera) (string, error) {
 		"Nest answer SDP found",
 	)
 
-	err = pc.SetRemoteDescription(
-		webrtc.SessionDescription{
-			Type: webrtc.SDPTypeAnswer,
-			SDP:  answer,
-		},
-	)
+	err =
+		pc.SetRemoteDescription(
+			webrtc.SessionDescription{
+				Type:
+					webrtc.SDPTypeAnswer,
+				SDP:
+					answer,
+			},
+		)
 
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
 	log.Println(
 		"Nest accepted Pion H264 offer and remote SDP",
 	)
 
-	return answer, nil
+	log.Println(
+		"Waiting for real camera RTP...",
+	)
+
+	deadline :=
+		time.NewTimer(
+			20 * time.Second,
+		)
+
+	defer deadline.Stop()
+
+	ticker :=
+		time.NewTicker(
+			1 * time.Second,
+		)
+
+	defer ticker.Stop()
+
+	for {
+		select {
+
+		case <-videoSeen:
+
+			log.Println(
+				"VIDEO TRACK RECEIVED FROM NEST",
+			)
+
+		case <-audioSeen:
+
+			log.Println(
+				"AUDIO TRACK RECEIVED FROM NEST",
+			)
+
+		case <-ticker.C:
+
+			videoPackets :=
+				atomic.LoadUint64(
+					&stats.VideoPackets,
+				)
+
+			videoBytes :=
+				atomic.LoadUint64(
+					&stats.VideoBytes,
+				)
+
+			audioPackets :=
+				atomic.LoadUint64(
+					&stats.AudioPackets,
+				)
+
+			if videoPackets > 0 {
+
+				log.Printf(
+					"REAL H264 VIDEO CONFIRMED: packets=%d bytes=%d audioPackets=%d",
+					videoPackets,
+					videoBytes,
+					audioPackets,
+				)
+
+				return stats, nil
+			}
+
+		case <-deadline.C:
+
+			return nil, fmt.Errorf(
+				"Nest WebRTC connected but no H264 RTP video received within 20 seconds",
+			)
+		}
+	}
 }
 
 func health(
@@ -443,9 +777,12 @@ func health(
 		w,
 		200,
 		map[string]interface{}{
-			"status":  "ok",
-			"bridge":  "pion-h264",
-			"version": 5,
+			"status":
+				"ok",
+			"bridge":
+				"pion-h264-rtp",
+			"version":
+				6,
 		},
 	)
 }
@@ -454,27 +791,34 @@ func start(
 	w http.ResponseWriter,
 	r *http.Request,
 ) {
-	if r.Method != http.MethodPost {
+	if r.Method !=
+		http.MethodPost {
+
 		writeJSON(
 			w,
 			405,
 			map[string]string{
-				"error": "POST required",
+				"error":
+					"POST required",
 			},
 		)
+
 		return
 	}
 
-	body, err := io.ReadAll(r.Body)
+	body, err :=
+		io.ReadAll(r.Body)
 
 	if err != nil {
 		writeJSON(
 			w,
 			400,
 			map[string]string{
-				"error": "could not read request body",
+				"error":
+					"could not read request body",
 			},
 		)
+
 		return
 	}
 
@@ -483,51 +827,72 @@ func start(
 		string(body),
 	)
 
-	var rawRequest map[string]interface{}
+	var rawRequest
+		map[string]interface{}
 
-	if err := json.Unmarshal(
-		body,
-		&rawRequest,
-	); err != nil {
+	if err :=
+		json.Unmarshal(
+			body,
+			&rawRequest,
+		); err != nil {
+
 		writeJSON(
 			w,
 			400,
 			map[string]string{
-				"error": "invalid JSON: " +
-					err.Error(),
+				"error":
+					"invalid JSON: " +
+						err.Error(),
 			},
 		)
+
 		return
 	}
 
 	cameraIndex := 0
 	cameraFound := false
 
-	for key, value := range rawRequest {
-		if strings.TrimSpace(key) != "camera" {
+	for key, value :=
+		range rawRequest {
+
+		if strings.TrimSpace(key) !=
+			"camera" {
+
 			continue
 		}
 
-		switch v := value.(type) {
+		switch v :=
+			value.(type) {
 
 		case float64:
-			cameraIndex = int(v)
-			cameraFound = true
+
+			cameraIndex =
+				int(v)
+
+			cameraFound =
+				true
 
 		case string:
-			v = strings.TrimSpace(v)
+
+			v =
+				strings.TrimSpace(v)
 
 			var parsed int
 
-			_, err := fmt.Sscanf(
-				v,
-				"%d",
-				&parsed,
-			)
+			_, parseErr :=
+				fmt.Sscanf(
+					v,
+					"%d",
+					&parsed,
+				)
 
-			if err == nil {
-				cameraIndex = parsed
-				cameraFound = true
+			if parseErr == nil {
+
+				cameraIndex =
+					parsed
+
+				cameraFound =
+					true
 			}
 		}
 	}
@@ -537,38 +902,47 @@ func start(
 			w,
 			400,
 			map[string]string{
-				"error": "camera field missing or invalid",
+				"error":
+					"camera field missing or invalid",
 			},
 		)
+
 		return
 	}
 
-	cameras, err := getCameras()
+	cameras, err :=
+		getCameras()
 
 	if err != nil {
 		writeJSON(
 			w,
 			502,
 			map[string]string{
-				"error": err.Error(),
+				"error":
+					err.Error(),
 			},
 		)
+
 		return
 	}
 
 	if cameraIndex < 0 ||
 		cameraIndex >= len(cameras) {
+
 		writeJSON(
 			w,
 			400,
 			map[string]string{
-				"error": "invalid camera index",
+				"error":
+					"invalid camera index",
 			},
 		)
+
 		return
 	}
 
-	camera := cameras[cameraIndex]
+	camera :=
+		cameras[cameraIndex]
 
 	log.Printf(
 		"Starting camera %d: %s",
@@ -576,7 +950,8 @@ func start(
 		camera.Name,
 	)
 
-	_, err = startCamera(camera)
+	stats, err :=
+		startCamera(camera)
 
 	if err != nil {
 		log.Println(
@@ -588,20 +963,56 @@ func start(
 			w,
 			502,
 			map[string]string{
-				"error": err.Error(),
+				"error":
+					err.Error(),
 			},
 		)
+
 		return
 	}
+
+	videoPackets :=
+		atomic.LoadUint64(
+			&stats.VideoPackets,
+		)
+
+	videoBytes :=
+		atomic.LoadUint64(
+			&stats.VideoBytes,
+		)
+
+	audioPackets :=
+		atomic.LoadUint64(
+			&stats.AudioPackets,
+		)
+
+	audioBytes :=
+		atomic.LoadUint64(
+			&stats.AudioBytes,
+		)
 
 	writeJSON(
 		w,
 		200,
 		map[string]interface{}{
-			"status": "connected",
-			"camera": cameraIndex,
-			"name":   camera.Name,
-			"total":  len(cameras),
+			"status":
+				"video_received",
+			"camera":
+				cameraIndex,
+			"name":
+				camera.Name,
+			"total":
+				len(cameras),
+			"videoPackets":
+				videoPackets,
+			"videoBytes":
+				videoBytes,
+			"audioPackets":
+				audioPackets,
+			"audioBytes":
+				audioBytes,
+			"h264":
+				videoPackets > 0,
 		},
 	)
 }
@@ -627,19 +1038,27 @@ func main() {
 				w,
 				200,
 				map[string]interface{}{
-					"name": "NestView TV Roku Media Bridge",
-					"engine": "Pion WebRTC",
-					"h264": true,
-					"opus": true,
-					"version": 5,
+					"name":
+						"NestView TV Roku Media Bridge",
+					"engine":
+						"Pion WebRTC",
+					"h264":
+						true,
+					"opus":
+						true,
+					"rtpTest":
+						true,
+					"version":
+						6,
 				},
 			)
 		},
 	)
 
 	log.Println(
-		"NestView TV Pion H264 Bridge VERSION 5 " +
-			"running on port " + port,
+		"NestView TV Pion H264 Bridge VERSION 6 " +
+			"running on port " +
+			port,
 	)
 
 	log.Fatal(
