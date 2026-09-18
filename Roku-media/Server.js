@@ -311,9 +311,81 @@ async function startCamera(cameraInfo) {
     direction: "recvonly",
   });
 
-  pc.addTransceiver("video", {
-    direction: "recvonly",
-  });
+  const videoTransceiver = pc.addTransceiver("video", {
+
+  direction: "recvonly",
+
+});
+
+const videoCapabilities =
+
+  wrtc.RTCRtpSender.getCapabilities("video");
+
+if (
+
+  videoCapabilities &&
+
+  Array.isArray(videoCapabilities.codecs)
+
+) {
+
+  const h264Codecs =
+
+    videoCapabilities.codecs.filter(
+
+      (codec) =>
+
+        codec.mimeType &&
+
+        codec.mimeType.toLowerCase() ===
+
+          "video/h264"
+
+    );
+
+  if (h264Codecs.length > 0) {
+
+    console.log(
+
+      "H264 codecs available:",
+
+      h264Codecs.length
+
+    );
+
+    if (
+
+      typeof videoTransceiver.setCodecPreferences ===
+
+      "function"
+
+    ) {
+
+      videoTransceiver.setCodecPreferences(
+
+        h264Codecs
+
+      );
+
+      console.log(
+
+        "H264 selected for Nest WebRTC offer"
+
+      );
+
+    }
+
+  } else {
+
+    console.log(
+
+      "WARNING: H264 codec not available in wrtc"
+
+    );
+
+  }
+
+}
 
   pc.createDataChannel("nest");
 
