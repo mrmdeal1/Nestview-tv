@@ -43,6 +43,7 @@ type MediaStats struct {
 	AudioBytes   uint64
 	AccessUnits  uint64
 	HLSSegments  uint64
+	EmptyPackets uint64
 }
 
 type HLSSegment struct {
@@ -65,6 +66,10 @@ type StreamSession struct {
 	currentBuffer *bytes.Buffer
 	currentWriter *mpegts.Writer
 	segmentStart  time.Time
+	segmentActive bool
+
+	sps []byte
+	pps []byte
 
 	ready chan struct{}
 	done  chan struct{}
@@ -93,9 +98,7 @@ func writeJSON(w http.ResponseWriter, status int, value interface{}) {
 }
 
 func getCameras() ([]Camera, error) {
-	client := &http.Client{
-		Timeout: 15 * time.Second,
-	}
+	client := &http.Client{Timeout: 15 * time.Second}
 
 	resp, err := client.Get(nestBackend + "/api/cameras")
 	if err != nil {
@@ -128,11 +131,7 @@ func getCameras() ([]Camera, error) {
 		list = value
 
 	case map[string]interface{}:
-		for _, key := range []string{
-			"cameras",
-			"devices",
-			"results",
-		} {
+		for _, key := range []string{"cameras", "devices", "results"} {
 			if candidate, ok := value[key].([]interface{}); ok {
 				list = candidate
 				break
@@ -170,13 +169,10 @@ func getCameras() ([]Camera, error) {
 		}
 
 		if strings.Contains(device, "/devices/") {
-			cameras = append(
-				cameras,
-				Camera{
-					Device: device,
-					Name:   label,
-				},
-			)
+			cameras = append(cameras, Camera{
+				Device: device,
+				Name:   label,
+			})
 		}
 	}
 
@@ -187,10 +183,7 @@ func getCameras() ([]Camera, error) {
 	return cameras, nil
 }
 
-func firstString(
-	m map[string]interface{},
-	keys ...string,
-) string {
+func firstString(m map[string]interface{}, keys ...string) string {
 	for _, key := range keys {
 		if value, ok := m[key].(string); ok && value != "" {
 			return value
@@ -250,37 +243,129 @@ func waitForICE(pc *webrtc.PeerConnection) {
 	}
 }
 
-func containsIDR(data []byte) bool {
-	for i := 0; i+3 < len(data); i++ {
-		start := -1
+func splitAnnexB(data []byte) [][]byte {
+	var nalus [][]byte
 
-		if i+3 < len(data) &&
-			data[i] == 0 &&
-			data[i+1] == 0 &&
-			data[i+2] == 1 {
-
-			start = i + 3
-		}
-
-		if i+4 < len(data) &&
-			data[i] == 0 &&
-			data[i+1] == 0 &&
-			data[i+2] == 0 &&
-			data[i+3] == 1 {
-
-			start = i + 4
-		}
-
-		if start >= 0 && start < len(data) {
-			naluType := data[start] & 0x1F
-
-			if naluType == 5 {
-				return true
+	findStart := func(from int) (int, int) {
+		for i := from; i < len(data); i++ {
+			if i+4 <= len(data) &&
+				data[i] == 0 &&
+				data[i+1] == 0 &&
+				data[i+2] == 0 &&
+				data[i+3] == 1 {
+				return i, 4
 			}
+
+			if i+3 <= len(data) &&
+				data[i] == 0 &&
+				data[i+1] == 0 &&
+				data[i+2] == 1 {
+				return i, 3
+			}
+		}
+
+		return -1, 0
+	}
+
+	pos := 0
+
+	for {
+		start, prefix := findStart(pos)
+		if start < 0 {
+			break
+		}
+
+		naluStart := start + prefix
+
+		next, _ := findStart(naluStart)
+		naluEnd := len(data)
+
+		if next >= 0 {
+			naluEnd = next
+		}
+
+		if naluStart < naluEnd {
+			nalu := append([]byte(nil), data[naluStart:naluEnd]...)
+			nalus = append(nalus, nalu)
+		}
+
+		if next < 0 {
+			break
+		}
+
+		pos = next
+	}
+
+	return nalus
+}
+
+func annexB(nalu []byte) []byte {
+	if len(nalu) == 0 {
+		return nil
+	}
+
+	out := make([]byte, 4+len(nalu))
+	out[0] = 0
+	out[1] = 0
+	out[2] = 0
+	out[3] = 1
+
+	copy(out[4:], nalu)
+
+	return out
+}
+
+func inspectAccessUnit(data []byte) (
+	hasIDR bool,
+	hasSPS bool,
+	hasPPS bool,
+	sps []byte,
+	pps []byte,
+) {
+	for _, nalu := range splitAnnexB(data) {
+		if len(nalu) == 0 {
+			continue
+		}
+
+		switch nalu[0] & 0x1F {
+		case 5:
+			hasIDR = true
+
+		case 7:
+			hasSPS = true
+			sps = annexB(nalu)
+
+		case 8:
+			hasPPS = true
+			pps = annexB(nalu)
 		}
 	}
 
-	return false
+	return
+}
+
+func (s *StreamSession) cacheParametersLocked(accessUnit []byte) {
+	_, hasSPS, hasPPS, sps, pps := inspectAccessUnit(accessUnit)
+
+	if hasSPS && len(sps) > 0 {
+		if !bytes.Equal(s.sps, sps) {
+			s.sps = append([]byte(nil), sps...)
+			log.Printf(
+				"VERSION 10 cached SPS: %d bytes",
+				len(s.sps),
+			)
+		}
+	}
+
+	if hasPPS && len(pps) > 0 {
+		if !bytes.Equal(s.pps, pps) {
+			s.pps = append([]byte(nil), pps...)
+			log.Printf(
+				"VERSION 10 cached PPS: %d bytes",
+				len(s.pps),
+			)
+		}
+	}
 }
 
 func (s *StreamSession) newSegmentLocked() error {
@@ -297,15 +382,16 @@ func (s *StreamSession) newSegmentLocked() error {
 	s.currentBuffer = buf
 	s.currentWriter = writer
 	s.segmentStart = time.Now()
+	s.segmentActive = true
 
 	return nil
 }
 
 func (s *StreamSession) finishSegmentLocked() {
-	if s.currentWriter == nil ||
+	if !s.segmentActive ||
+		s.currentWriter == nil ||
 		s.currentBuffer == nil ||
 		s.currentBuffer.Len() == 0 {
-
 		return
 	}
 
@@ -327,6 +413,7 @@ func (s *StreamSession) finishSegmentLocked() {
 	}
 
 	s.NextSequence++
+
 	s.Segments = append(
 		s.Segments,
 		segment,
@@ -345,7 +432,7 @@ func (s *StreamSession) finishSegmentLocked() {
 	)
 
 	log.Printf(
-		"VERSION 9 HLS SEGMENT READY: sequence=%d duration=%.3f size=%d",
+		"VERSION 10 HLS SEGMENT READY: sequence=%d duration=%.3f size=%d",
 		segment.Sequence,
 		segment.Duration,
 		len(segment.Data),
@@ -357,6 +444,29 @@ func (s *StreamSession) finishSegmentLocked() {
 
 	s.currentBuffer = nil
 	s.currentWriter = nil
+	s.segmentActive = false
+}
+
+func (s *StreamSession) keyframeAccessUnitLocked(accessUnit []byte) []byte {
+	hasIDR, hasSPS, hasPPS, _, _ := inspectAccessUnit(accessUnit)
+
+	if !hasIDR {
+		return accessUnit
+	}
+
+	var out []byte
+
+	if !hasSPS && len(s.sps) > 0 {
+		out = append(out, s.sps...)
+	}
+
+	if !hasPPS && len(s.pps) > 0 {
+		out = append(out, s.pps...)
+	}
+
+	out = append(out, accessUnit...)
+
+	return out
 }
 
 func (s *StreamSession) writeAccessUnit(
@@ -372,15 +482,33 @@ func (s *StreamSession) writeAccessUnit(
 	default:
 	}
 
-	if s.currentWriter == nil {
+	s.cacheParametersLocked(accessUnit)
+
+	hasIDR, _, _, _, _ := inspectAccessUnit(accessUnit)
+
+	/*
+		Version 10:
+		The first HLS segment is not started until an IDR
+		keyframe arrives. Every following segment is also
+		cut immediately before an IDR.
+	*/
+	if !s.segmentActive {
+		if !hasIDR {
+			return nil
+		}
+
 		if err := s.newSegmentLocked(); err != nil {
 			return err
 		}
+
+		log.Printf(
+			"VERSION 10 HLS started on IDR: SPS=%t PPS=%t",
+			len(s.sps) > 0,
+			len(s.pps) > 0,
+		)
 	}
 
-	isIDR := containsIDR(accessUnit)
-
-	if isIDR &&
+	if hasIDR &&
 		s.currentBuffer != nil &&
 		s.currentBuffer.Len() > 0 &&
 		time.Since(s.segmentStart) >= segmentDuration {
@@ -390,13 +518,20 @@ func (s *StreamSession) writeAccessUnit(
 		if err := s.newSegmentLocked(); err != nil {
 			return err
 		}
+
+		log.Printf(
+			"VERSION 10 new IDR segment: sequence=%d",
+			s.NextSequence,
+		)
 	}
+
+	outputAU := s.keyframeAccessUnitLocked(accessUnit)
 
 	return s.currentWriter.WriteH264(
 		videoPID,
 		pts,
 		pts,
-		accessUnit,
+		outputAU,
 	)
 }
 
@@ -406,15 +541,16 @@ func (s *StreamSession) Close() {
 
 		s.mu.Lock()
 
-		if s.currentWriter != nil &&
+		if s.segmentActive &&
+			s.currentWriter != nil &&
 			s.currentBuffer != nil &&
 			s.currentBuffer.Len() > 0 {
-
 			s.finishSegmentLocked()
 		}
 
 		s.currentWriter = nil
 		s.currentBuffer = nil
+		s.segmentActive = false
 
 		s.mu.Unlock()
 
@@ -468,7 +604,7 @@ func createStreamSession(
 	err = mediaEngine.RegisterCodec(
 		webrtc.RTPCodecParameters{
 			RTPCodecCapability: webrtc.RTPCodecCapability{
-				MimeType:  webrtc.MimeTypeH264,
+				MimeType: webrtc.MimeTypeH264,
 				ClockRate: 90000,
 				SDPFmtpLine: "level-asymmetry-allowed=1;" +
 					"packetization-mode=1;" +
@@ -505,15 +641,14 @@ func createStreamSession(
 	pc.OnConnectionStateChange(
 		func(state webrtc.PeerConnectionState) {
 			log.Printf(
-				"VERSION 9 WebRTC state: %s",
+				"VERSION 10 WebRTC state: %s",
 				state.String(),
 			)
 
 			if state == webrtc.PeerConnectionStateFailed ||
 				state == webrtc.PeerConnectionStateClosed {
-
 				log.Println(
-					"VERSION 9 WebRTC session ended",
+					"VERSION 10 WebRTC session ended",
 				)
 			}
 		},
@@ -527,7 +662,7 @@ func createStreamSession(
 			codec := track.Codec()
 
 			log.Printf(
-				"VERSION 9 incoming track: kind=%s codec=%s payload=%d",
+				"VERSION 10 incoming track: kind=%s codec=%s payload=%d",
 				track.Kind().String(),
 				codec.MimeType,
 				codec.PayloadType,
@@ -542,9 +677,10 @@ func createStreamSession(
 
 					for {
 						packet, _, err := track.ReadRTP()
+
 						if err != nil {
 							log.Println(
-								"VERSION 9 video RTP ended:",
+								"VERSION 10 video RTP ended:",
 								err,
 							)
 							return
@@ -560,6 +696,20 @@ func createStreamSession(
 							uint64(len(packet.Payload)),
 						)
 
+						/*
+							Ignore empty RTP payloads.
+							Version 9 was sending these to
+							the H264 depacketizer, causing
+							the repeated zero-byte errors.
+						*/
+						if len(packet.Payload) == 0 {
+							atomic.AddUint64(
+								&session.Stats.EmptyPackets,
+								1,
+							)
+							continue
+						}
+
 						if !havePTS {
 							accessUnitPTS = int64(
 								packet.Timestamp,
@@ -567,14 +717,13 @@ func createStreamSession(
 							havePTS = true
 						}
 
-						h264Data, err :=
-							depacketizer.Unmarshal(
-								packet.Payload,
-							)
+						h264Data, err := depacketizer.Unmarshal(
+							packet.Payload,
+						)
 
 						if err != nil {
 							log.Printf(
-								"VERSION 9 H264 depacketize error: %v",
+								"VERSION 10 H264 depacketize error: %v",
 								err,
 							)
 
@@ -593,11 +742,10 @@ func createStreamSession(
 						if packet.Marker &&
 							len(accessUnit) > 0 {
 
-							units :=
-								atomic.AddUint64(
-									&session.Stats.AccessUnits,
-									1,
-								)
+							units := atomic.AddUint64(
+								&session.Stats.AccessUnits,
+								1,
+							)
 
 							err = session.writeAccessUnit(
 								accessUnit,
@@ -606,7 +754,7 @@ func createStreamSession(
 
 							if err != nil {
 								log.Printf(
-									"VERSION 9 MPEGTS write error: %v",
+									"VERSION 10 MPEGTS write error: %v",
 									err,
 								)
 							}
@@ -615,7 +763,7 @@ func createStreamSession(
 								units%30 == 0 {
 
 								log.Printf(
-									"VERSION 9 H264 AU: units=%d packets=%d size=%d",
+									"VERSION 10 H264 AU: units=%d packets=%d size=%d",
 									units,
 									packets,
 									len(accessUnit),
@@ -633,12 +781,17 @@ func createStreamSession(
 				go func() {
 					for {
 						packet, _, err := track.ReadRTP()
+
 						if err != nil {
 							log.Println(
-								"VERSION 9 audio RTP ended:",
+								"VERSION 10 audio RTP ended:",
 								err,
 							)
 							return
+						}
+
+						if len(packet.Payload) == 0 {
+							continue
 						}
 
 						atomic.AddUint64(
@@ -659,8 +812,7 @@ func createStreamSession(
 	_, err = pc.AddTransceiverFromKind(
 		webrtc.RTPCodecTypeAudio,
 		webrtc.RTPTransceiverInit{
-			Direction:
-				webrtc.RTPTransceiverDirectionRecvonly,
+			Direction: webrtc.RTPTransceiverDirectionRecvonly,
 		},
 	)
 	if err != nil {
@@ -671,8 +823,7 @@ func createStreamSession(
 	_, err = pc.AddTransceiverFromKind(
 		webrtc.RTPCodecTypeVideo,
 		webrtc.RTPTransceiverInit{
-			Direction:
-				webrtc.RTPTransceiverDirectionRecvonly,
+			Direction: webrtc.RTPTransceiverDirectionRecvonly,
 		},
 	)
 	if err != nil {
@@ -703,6 +854,7 @@ func createStreamSession(
 	waitForICE(pc)
 
 	local := pc.LocalDescription()
+
 	if local == nil {
 		session.Close()
 		return nil, fmt.Errorf("local SDP missing")
@@ -763,7 +915,7 @@ func createStreamSession(
 	}
 
 	log.Println(
-		"VERSION 9 SDP confirmed: audio -> video -> application",
+		"VERSION 10 SDP confirmed: audio -> video -> application",
 	)
 
 	payload := map[string]string{
@@ -772,6 +924,7 @@ func createStreamSession(
 	}
 
 	data, err := json.Marshal(payload)
+
 	if err != nil {
 		session.Close()
 		return nil, err
@@ -786,20 +939,23 @@ func createStreamSession(
 		"application/json",
 		bytes.NewReader(data),
 	)
+
 	if err != nil {
 		session.Close()
 		return nil, err
 	}
+
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
+
 	if err != nil {
 		session.Close()
 		return nil, err
 	}
 
 	log.Printf(
-		"VERSION 9 Nest backend HTTP status: %d",
+		"VERSION 10 Nest backend HTTP status: %d",
 		resp.StatusCode,
 	)
 
@@ -846,13 +1002,14 @@ func createStreamSession(
 			SDP:  answer,
 		},
 	)
+
 	if err != nil {
 		session.Close()
 		return nil, err
 	}
 
 	log.Println(
-		"VERSION 9 Nest WebRTC session started",
+		"VERSION 10 Nest WebRTC session started",
 	)
 
 	return session, nil
@@ -878,525 +1035,4 @@ func health(
 	writeJSON(
 		w,
 		200,
-		map[string]interface{}{
-			"status":    "ok",
-			"bridge":    "pion-h264-hls",
-			"version":   9,
-			"streaming": streaming,
-			"segments":  segments,
-		},
-	)
-}
-
-func start(
-	w http.ResponseWriter,
-	r *http.Request,
-) {
-	if r.Method != http.MethodPost {
-		writeJSON(
-			w,
-			405,
-			map[string]string{
-				"error": "POST required",
-			},
-		)
-		return
-	}
-
-	body, err := io.ReadAll(r.Body)
-	if err != nil {
-		writeJSON(
-			w,
-			400,
-			map[string]string{
-				"error": "could not read request body",
-			},
-		)
-		return
-	}
-
-	log.Printf(
-		"VERSION 9 Shortcut body: %q",
-		string(body),
-	)
-
-	var rawRequest map[string]interface{}
-
-	if err := json.Unmarshal(
-		body,
-		&rawRequest,
-	); err != nil {
-
-		writeJSON(
-			w,
-			400,
-			map[string]string{
-				"error":
-					"invalid JSON: " +
-						err.Error(),
-			},
-		)
-		return
-	}
-
-	cameraIndex := 0
-	cameraFound := false
-
-	for key, value := range rawRequest {
-		if strings.TrimSpace(key) != "camera" {
-			continue
-		}
-
-		switch v := value.(type) {
-		case float64:
-			cameraIndex = int(v)
-			cameraFound = true
-
-		case string:
-			v = strings.TrimSpace(v)
-
-			var parsed int
-
-			_, parseErr := fmt.Sscanf(
-				v,
-				"%d",
-				&parsed,
-			)
-
-			if parseErr == nil {
-				cameraIndex = parsed
-				cameraFound = true
-			}
-		}
-	}
-
-	if !cameraFound {
-		writeJSON(
-			w,
-			400,
-			map[string]string{
-				"error":
-					"camera field missing or invalid",
-			},
-		)
-		return
-	}
-
-	cameras, err := getCameras()
-	if err != nil {
-		writeJSON(
-			w,
-			502,
-			map[string]string{
-				"error": err.Error(),
-			},
-		)
-		return
-	}
-
-	if cameraIndex < 0 ||
-		cameraIndex >= len(cameras) {
-
-		writeJSON(
-			w,
-			400,
-			map[string]string{
-				"error":
-					"invalid camera index",
-			},
-		)
-		return
-	}
-
-	camera := cameras[cameraIndex]
-
-	log.Printf(
-		"VERSION 9 starting camera %d: %s",
-		cameraIndex,
-		camera.Name,
-	)
-
-	session, err := createStreamSession(
-		camera,
-		cameraIndex,
-	)
-
-	if err != nil {
-		log.Println(
-			"VERSION 9 camera start failed:",
-			err,
-		)
-
-		writeJSON(
-			w,
-			502,
-			map[string]string{
-				"error": err.Error(),
-			},
-		)
-		return
-	}
-
-	replaceSession(session)
-
-	select {
-	case <-session.ready:
-		log.Println(
-			"VERSION 9 HLS READY",
-		)
-
-	case <-time.After(20 * time.Second):
-		session.Close()
-
-		sessionMu.Lock()
-
-		if currentSession == session {
-			currentSession = nil
-		}
-
-		sessionMu.Unlock()
-
-		writeJSON(
-			w,
-			504,
-			map[string]string{
-				"error":
-					"HLS segment was not ready within 20 seconds",
-			},
-		)
-		return
-	}
-
-	writeJSON(
-		w,
-		200,
-		map[string]interface{}{
-			"status": "streaming",
-			"camera": cameraIndex,
-			"name":   camera.Name,
-			"total":  len(cameras),
-			"hls":    "/live/index.m3u8",
-
-			"videoPackets":
-				atomic.LoadUint64(
-					&session.Stats.VideoPackets,
-				),
-
-			"accessUnits":
-				atomic.LoadUint64(
-					&session.Stats.AccessUnits,
-				),
-
-			"segments":
-				atomic.LoadUint64(
-					&session.Stats.HLSSegments,
-				),
-		},
-	)
-}
-
-func statusHandler(
-	w http.ResponseWriter,
-	r *http.Request,
-) {
-	session := getSession()
-
-	if session == nil {
-		writeJSON(
-			w,
-			200,
-			map[string]interface{}{
-				"streaming": false,
-				"version":   9,
-			},
-		)
-		return
-	}
-
-	writeJSON(
-		w,
-		200,
-		map[string]interface{}{
-			"streaming": true,
-			"version":   9,
-			"camera":    session.Index,
-			"name":      session.Camera.Name,
-
-			"videoPackets":
-				atomic.LoadUint64(
-					&session.Stats.VideoPackets,
-				),
-
-			"videoBytes":
-				atomic.LoadUint64(
-					&session.Stats.VideoBytes,
-				),
-
-			"accessUnits":
-				atomic.LoadUint64(
-					&session.Stats.AccessUnits,
-				),
-
-			"segments":
-				atomic.LoadUint64(
-					&session.Stats.HLSSegments,
-				),
-
-			"audioPackets":
-				atomic.LoadUint64(
-					&session.Stats.AudioPackets,
-				),
-		},
-	)
-}
-
-func playlistHandler(
-	w http.ResponseWriter,
-	r *http.Request,
-) {
-	session := getSession()
-
-	if session == nil {
-		http.Error(
-			w,
-			"no active stream",
-			http.StatusNotFound,
-		)
-		return
-	}
-
-	session.mu.RLock()
-	defer session.mu.RUnlock()
-
-	if len(session.Segments) == 0 {
-		http.Error(
-			w,
-			"HLS not ready",
-			http.StatusServiceUnavailable,
-		)
-		return
-	}
-
-	firstSequence :=
-		session.Segments[0].Sequence
-
-	targetDuration := 1
-
-	for _, segment := range session.Segments {
-		duration := int(
-			math.Ceil(segment.Duration),
-		)
-
-		if duration > targetDuration {
-			targetDuration = duration
-		}
-	}
-
-	var playlist strings.Builder
-
-	playlist.WriteString(
-		"#EXTM3U\n",
-	)
-
-	playlist.WriteString(
-		"#EXT-X-VERSION:3\n",
-	)
-
-	playlist.WriteString(
-		"#EXT-X-TARGETDURATION:" +
-			strconv.Itoa(targetDuration) +
-			"\n",
-	)
-
-	playlist.WriteString(
-		"#EXT-X-MEDIA-SEQUENCE:" +
-			strconv.Itoa(firstSequence) +
-			"\n",
-	)
-
-	for _, segment := range session.Segments {
-		playlist.WriteString(
-			fmt.Sprintf(
-				"#EXTINF:%.3f,\n",
-				segment.Duration,
-			),
-		)
-
-		playlist.WriteString(
-			fmt.Sprintf(
-				"segment%d.ts\n",
-				segment.Sequence,
-			),
-		)
-	}
-
-	w.Header().Set(
-		"Content-Type",
-		"application/vnd.apple.mpegurl",
-	)
-
-	w.Header().Set(
-		"Cache-Control",
-		"no-store, no-cache, must-revalidate",
-	)
-
-	_, _ = w.Write(
-		[]byte(playlist.String()),
-	)
-}
-
-func segmentHandler(
-	w http.ResponseWriter,
-	r *http.Request,
-) {
-	session := getSession()
-
-	if session == nil {
-		http.NotFound(w, r)
-		return
-	}
-
-	name := strings.TrimPrefix(
-		r.URL.Path,
-		"/live/segment",
-	)
-
-	name = strings.TrimSuffix(
-		name,
-		".ts",
-	)
-
-	sequence, err := strconv.Atoi(name)
-	if err != nil {
-		http.NotFound(w, r)
-		return
-	}
-
-	session.mu.RLock()
-	defer session.mu.RUnlock()
-
-	for _, segment := range session.Segments {
-		if segment.Sequence == sequence {
-			w.Header().Set(
-				"Content-Type",
-				"video/mp2t",
-			)
-
-			w.Header().Set(
-				"Cache-Control",
-				"no-store, no-cache, must-revalidate",
-			)
-
-			w.Header().Set(
-				"Content-Length",
-				strconv.Itoa(len(segment.Data)),
-			)
-
-			_, _ = w.Write(
-				segment.Data,
-			)
-			return
-		}
-	}
-
-	http.NotFound(w, r)
-}
-
-func stopHandler(
-	w http.ResponseWriter,
-	r *http.Request,
-) {
-	sessionMu.Lock()
-
-	session := currentSession
-	currentSession = nil
-
-	sessionMu.Unlock()
-
-	if session != nil {
-		session.Close()
-	}
-
-	writeJSON(
-		w,
-		200,
-		map[string]interface{}{
-			"status":  "stopped",
-			"version": 9,
-		},
-	)
-}
-
-func main() {
-	http.HandleFunc(
-		"/health",
-		health,
-	)
-
-	http.HandleFunc(
-		"/start",
-		start,
-	)
-
-	http.HandleFunc(
-		"/status",
-		statusHandler,
-	)
-
-	http.HandleFunc(
-		"/stop",
-		stopHandler,
-	)
-
-	http.HandleFunc(
-		"/live/index.m3u8",
-		playlistHandler,
-	)
-
-	http.HandleFunc(
-		"/live/segment",
-		segmentHandler,
-	)
-
-	http.HandleFunc(
-		"/",
-		func(
-			w http.ResponseWriter,
-			r *http.Request,
-		) {
-			writeJSON(
-				w,
-				200,
-				map[string]interface{}{
-					"name":
-						"NestView TV Roku Media Bridge",
-
-					"engine":
-						"Pion WebRTC -> MPEG-TS -> HLS",
-
-					"h264":
-						true,
-
-					"hls":
-						true,
-
-					"version":
-						9,
-				},
-			)
-		},
-	)
-
-	log.Println(
-		"NestView TV Pion HLS Bridge VERSION 9 " +
-			"running on port " +
-			port,
-	)
-
-	log.Fatal(
-		http.ListenAndServe(
-			":"+port,
-			nil,
-		),
-	)
-}
+		map
