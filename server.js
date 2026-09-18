@@ -231,7 +231,11 @@ async function getAccessToken() {
       accessToken = tokenData.access_token;
 
     }
+if (result.status !== 200) {
 
+  console.log("REFRESH TOKEN ERROR:", result.status, result.data);
+
+}
   }
 
   return accessToken;
