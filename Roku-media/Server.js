@@ -1,0 +1,803 @@
+const http = require("http");
+
+const https = require("https");
+
+const { spawn } = require("child_process");
+
+const fs = require("fs");
+
+const path = require("path");
+
+const wrtc = require("@roamhq/wrtc");
+
+const PORT = process.env.PORT || 10000;
+
+const NEST_BACKEND =
+
+  process.env.NEST_BACKEND ||
+
+  "https://nestview-tv.onrender.com";
+
+const STREAM_DIR = "/tmp/nestview-hls";
+
+let session = null;
+
+fs.mkdirSync(STREAM_DIR, { recursive: true });
+
+function jsonRequest(url, method = "GET", body = null) {
+
+  return new Promise((resolve, reject) => {
+
+    const target = new URL(url);
+
+    const data = body ? JSON.stringify(body) : null;
+
+    const req = https.request(
+
+      {
+
+        hostname: target.hostname,
+
+        port: target.port || 443,
+
+        path: target.pathname + target.search,
+
+        method,
+
+        headers: data
+
+          ? {
+
+              "Content-Type": "application/json",
+
+              "Content-Length": Buffer.byteLength(data),
+
+            }
+
+          : {},
+
+      },
+
+      (res) => {
+
+        let raw = "";
+
+        res.on("data", (chunk) => {
+
+          raw += chunk;
+
+        });
+
+        res.on("end", () => {
+
+          try {
+
+            const parsed = raw ? JSON.parse(raw) : {};
+
+            if (res.statusCode < 200 || res.statusCode >= 300) {
+
+              reject(
+
+                new Error(
+
+                  "Backend returned " +
+
+                    res.statusCode +
+
+                    ": " +
+
+                    raw
+
+                )
+
+              );
+
+              return;
+
+            }
+
+            resolve(parsed);
+
+          } catch (err) {
+
+            reject(err);
+
+          }
+
+        });
+
+      }
+
+    );
+
+    req.on("error", reject);
+
+    if (data) req.write(data);
+
+    req.end();
+
+  });
+
+}
+
+function sendJson(res, status, data) {
+
+  res.writeHead(status, {
+
+    "Content-Type": "application/json",
+
+    "Access-Control-Allow-Origin": "*",
+
+  });
+
+  res.end(JSON.stringify(data));
+
+}
+
+function stopSession() {
+
+  if (!session) return;
+
+  console.log("Stopping current camera session");
+
+  try {
+
+    if (session.sink) session.sink.stop();
+
+  } catch (_) {}
+
+  try {
+
+    if (session.ffmpeg) session.ffmpeg.kill("SIGKILL");
+
+  } catch (_) {}
+
+  try {
+
+    if (session.pc) session.pc.close();
+
+  } catch (_) {}
+
+  session = null;
+
+}
+
+function clearHls() {
+
+  try {
+
+    const files = fs.readdirSync(STREAM_DIR);
+
+    for (const file of files) {
+
+      fs.unlinkSync(path.join(STREAM_DIR, file));
+
+    }
+
+  } catch (_) {}
+
+}
+
+function waitForIce(pc) {
+
+  return new Promise((resolve) => {
+
+    if (pc.iceGatheringState === "complete") {
+
+      resolve();
+
+      return;
+
+    }
+
+    const timeout = setTimeout(resolve, 5000);
+
+    pc.onicegatheringstatechange = () => {
+
+      if (pc.iceGatheringState === "complete") {
+
+        clearTimeout(timeout);
+
+        resolve();
+
+      }
+
+    };
+
+  });
+
+}
+
+async function startCamera(device) {
+
+  stopSession();
+
+  clearHls();
+
+  console.log("Starting camera:", device);
+
+  const pc = new wrtc.RTCPeerConnection({
+
+    sdpSemantics: "unified-plan",
+
+  });
+
+  pc.addTransceiver("audio", {
+
+    direction: "recvonly",
+
+  });
+
+  pc.addTransceiver("video", {
+
+    direction: "recvonly",
+
+  });
+
+  pc.createDataChannel("nest");
+
+  let videoTrack = null;
+
+  const trackPromise = new Promise((resolve) => {
+
+    pc.ontrack = (event) => {
+
+      console.log(
+
+        "Received track:",
+
+        event.track.kind
+
+      );
+
+      if (
+
+        event.track.kind === "video" &&
+
+        !videoTrack
+
+      ) {
+
+        videoTrack = event.track;
+
+        resolve(event.track);
+
+      }
+
+    };
+
+  });
+
+  const offer = await pc.createOffer();
+
+  await pc.setLocalDescription(offer);
+
+  await waitForIce(pc);
+
+  let offerSdp = pc.localDescription.sdp;
+
+  if (!offerSdp.endsWith("\n")) {
+
+    offerSdp += "\r\n";
+
+  }
+
+  const response = await jsonRequest(
+
+    NEST_BACKEND + "/api/webrtc",
+
+    "POST",
+
+    {
+
+      device,
+
+      offerSdp,
+
+    }
+
+  );
+
+  const result = response.results || response;
+
+  if (!result.answerSdp) {
+
+    throw new Error(
+
+      "Nest backend did not return answerSdp"
+
+    );
+
+  }
+
+  await pc.setRemoteDescription({
+
+    type: "answer",
+
+    sdp: result.answerSdp,
+
+  });
+
+  const track = await Promise.race([
+
+    trackPromise,
+
+    new Promise((_, reject) =>
+
+      setTimeout(
+
+        () =>
+
+          reject(
+
+            new Error(
+
+              "Timed out waiting for Nest video"
+
+            )
+
+          ),
+
+        15000
+
+      )
+
+    ),
+
+  ]);
+
+  const sink =
+
+    new wrtc.nonstandard.RTCVideoSink(track);
+
+  let ffmpeg = null;
+
+  let width = 0;
+
+  let height = 0;
+
+  sink.onframe = ({ frame }) => {
+
+    if (!ffmpeg) {
+
+      width = frame.width;
+
+      height = frame.height;
+
+      console.log(
+
+        "Nest video:",
+
+        width + "x" + height
+
+      );
+
+      ffmpeg = spawn(
+
+        "ffmpeg",
+
+        [
+
+          "-hide_banner",
+
+          "-loglevel",
+
+          "warning",
+
+          "-f",
+
+          "rawvideo",
+
+          "-pix_fmt",
+
+          "yuv420p",
+
+          "-s",
+
+          width + "x" + height,
+
+          "-r",
+
+          "15",
+
+          "-i",
+
+          "pipe:0",
+
+          "-an",
+
+          "-c:v",
+
+          "libx264",
+
+          "-preset",
+
+          "veryfast",
+
+          "-tune",
+
+          "zerolatency",
+
+          "-profile:v",
+
+          "main",
+
+          "-pix_fmt",
+
+          "yuv420p",
+
+          "-g",
+
+          "30",
+
+          "-keyint_min",
+
+          "30",
+
+          "-f",
+
+          "hls",
+
+          "-hls_time",
+
+          "2",
+
+          "-hls_list_size",
+
+          "4",
+
+          "-hls_flags",
+
+          "delete_segments+append_list",
+
+          path.join(
+
+            STREAM_DIR,
+
+            "index.m3u8"
+
+          ),
+
+        ],
+
+        {
+
+          stdio: [
+
+            "pipe",
+
+            "inherit",
+
+            "inherit",
+
+          ],
+
+        }
+
+      );
+
+      ffmpeg.on("exit", (code) => {
+
+        console.log(
+
+          "FFmpeg exited:",
+
+          code
+
+        );
+
+      });
+
+      if (session) {
+
+        session.ffmpeg = ffmpeg;
+
+      }
+
+    }
+
+    if (
+
+      ffmpeg &&
+
+      ffmpeg.stdin &&
+
+      !ffmpeg.stdin.destroyed
+
+    ) {
+
+      try {
+
+        ffmpeg.stdin.write(frame.data);
+
+      } catch (_) {}
+
+    }
+
+  };
+
+  session = {
+
+    device,
+
+    pc,
+
+    sink,
+
+    ffmpeg,
+
+    startedAt: Date.now(),
+
+    expiresAt: result.expiresAt || null,
+
+  };
+
+  return {
+
+    device,
+
+    expiresAt: result.expiresAt || null,
+
+  };
+
+}
+
+function serveHls(req, res) {
+
+  const filename =
+
+    req.url === "/live/index.m3u8"
+
+      ? "index.m3u8"
+
+      : path.basename(req.url);
+
+  const filePath = path.join(
+
+    STREAM_DIR,
+
+    filename
+
+  );
+
+  if (!fs.existsSync(filePath)) {
+
+    res.writeHead(404);
+
+    res.end("Stream not ready");
+
+    return;
+
+  }
+
+  const ext = path.extname(filePath);
+
+  const type =
+
+    ext === ".m3u8"
+
+      ? "application/vnd.apple.mpegurl"
+
+      : "video/mp2t";
+
+  res.writeHead(200, {
+
+    "Content-Type": type,
+
+    "Cache-Control": "no-store",
+
+    "Access-Control-Allow-Origin": "*",
+
+  });
+
+  fs.createReadStream(filePath).pipe(res);
+
+}
+
+const server = http.createServer(
+
+  async (req, res) => {
+
+    try {
+
+      if (req.method === "GET" && req.url === "/") {
+
+        sendJson(res, 200, {
+
+          app: "NestView TV Media Bridge",
+
+          version: "1",
+
+          status: "online",
+
+          streaming: !!session,
+
+        });
+
+        return;
+
+      }
+
+      if (
+
+        req.method === "GET" &&
+
+        req.url === "/health"
+
+      ) {
+
+        sendJson(res, 200, {
+
+          status: "ok",
+
+          ffmpeg: session
+
+            ? !!session.ffmpeg
+
+            : false,
+
+          camera: session
+
+            ? session.device
+
+            : null,
+
+        });
+
+        return;
+
+      }
+
+      if (
+
+        req.method === "POST" &&
+
+        req.url === "/start"
+
+      ) {
+
+        let raw = "";
+
+        req.on("data", (chunk) => {
+
+          raw += chunk;
+
+        });
+
+        req.on("end", async () => {
+
+          try {
+
+            const body = JSON.parse(
+
+              raw || "{}"
+
+            );
+
+            if (!body.device) {
+
+              sendJson(res, 400, {
+
+                error: "device required",
+
+              });
+
+              return;
+
+            }
+
+            const result =
+
+              await startCamera(
+
+                body.device
+
+              );
+
+            sendJson(res, 200, {
+
+              ok: true,
+
+              ...result,
+
+              hls: "/live/index.m3u8",
+
+            });
+
+          } catch (err) {
+
+            console.error(err);
+
+            stopSession();
+
+            sendJson(res, 500, {
+
+              error: err.message,
+
+            });
+
+          }
+
+        });
+
+        return;
+
+      }
+
+      if (
+
+        req.method === "POST" &&
+
+        req.url === "/stop"
+
+      ) {
+
+        stopSession();
+
+        clearHls();
+
+        sendJson(res, 200, {
+
+          ok: true,
+
+        });
+
+        return;
+
+      }
+
+      if (
+
+        req.method === "GET" &&
+
+        req.url.startsWith("/live/")
+
+      ) {
+
+        serveHls(req, res);
+
+        return;
+
+      }
+
+      sendJson(res, 404, {
+
+        error: "Not found",
+
+      });
+
+    } catch (err) {
+
+      console.error(err);
+
+      sendJson(res, 500, {
+
+        error: err.message,
+
+      });
+
+    }
+
+  }
+
+);
+
+server.listen(
+
+  PORT,
+
+  "0.0.0.0",
+
+  () => {
+
+    console.log(
+
+      "NestView TV Media Bridge running on port " +
+
+        PORT
+
+    );
+
+  }
+
+);
