@@ -16,7 +16,11 @@ const REDIRECT_URI =
 
 let accessToken = null;
 
-let refreshToken = process.env.GOOGLE_REFRESH_TOKEN || null;
+let accessTokenExpiresAt = 0;
+
+let refreshToken =
+
+  process.env.GOOGLE_REFRESH_TOKEN || null;
 
 function sendJson(res, status, data) {
 
@@ -24,37 +28,17 @@ function sendJson(res, status, data) {
 
     "Content-Type": "application/json",
 
-    "Access-Control-Allow-Origin": "*"
+    "Cache-Control": "no-store"
 
   });
 
-  res.end(JSON.stringify(data, null, 2));
+  res.end(JSON.stringify(data));
 
 }
 
-function postForm(hostname, path, formData) {
+function googleRequest(options, body = null) {
 
   return new Promise((resolve, reject) => {
-
-    const body = new URLSearchParams(formData).toString();
-
-    const options = {
-
-      hostname: hostname,
-
-      path: path,
-
-      method: "POST",
-
-      headers: {
-
-        "Content-Type": "application/x-www-form-urlencoded",
-
-        "Content-Length": Buffer.byteLength(body)
-
-      }
-
-    };
 
     const request = https.request(options, response => {
 
@@ -72,7 +56,7 @@ function postForm(hostname, path, formData) {
 
           status: response.statusCode,
 
-          data: data
+          data
 
         });
 
@@ -82,250 +66,216 @@ function postForm(hostname, path, formData) {
 
     request.on("error", reject);
 
-    request.write(body);
+    if (body) {
 
-    request.end();
-
-  });
-
-}
-
-function googleGet(path, token) {
-
-  return new Promise((resolve, reject) => {
-
-    const options = {
-
-      hostname: "smartdevicemanagement.googleapis.com",
-
-      path: path,
-
-      method: "GET",
-
-      headers: {
-
-        Authorization: "Bearer " + token
-
-      }
-
-    };
-
-    const request = https.request(options, response => {
-
-      let data = "";
-
-      response.on("data", chunk => {
-
-        data += chunk;
-
-      });
-
-      response.on("end", () => {
-
-        resolve({
-
-          status: response.statusCode,
-
-          data: data
-
-        });
-
-      });
-
-    });
-
-    request.on("error", reject);
-
-    request.end();
-
-  });
-
-}
-function googlePost(path, token, bodyObject) {
-
-  return new Promise((resolve, reject) => {
-
-    const body = JSON.stringify(bodyObject);
-
-    const options = {
-
-      hostname: "smartdevicemanagement.googleapis.com",
-
-      path: path,
-
-      method: "POST",
-
-      headers: {
-
-        Authorization: "Bearer " + token,
-
-        "Content-Type": "application/json",
-
-        "Content-Length": Buffer.byteLength(body)
-
-      }
-
-    };
-
-    const request = https.request(options, response => {
-
-      let data = "";
-
-      response.on("data", chunk => {
-
-        data += chunk;
-
-      });
-
-      response.on("end", () => {
-
-        resolve({
-
-          status: response.statusCode,
-
-          data: data
-
-        });
-
-      });
-
-    });
-
-    request.on("error", reject);
-
-    request.write(body);
-
-    request.end();
-
-  });
-
-}
-async function getAccessToken() {
-
-  if (refreshToken) {
-
-    const result = await postForm(
-
-      "oauth2.googleapis.com",
-
-      "/token",
-
-      {
-
-        client_id: CLIENT_ID,
-
-        client_secret: CLIENT_SECRET,
-
-        refresh_token: refreshToken,
-
-        grant_type: "refresh_token"
-
-      }
-
-    );
-
-    if (result.status === 200) {
-
-      const tokenData = JSON.parse(result.data);
-
-      accessToken = tokenData.access_token;
+      request.write(body);
 
     }
-if (result.status !== 200) {
 
-  console.log("REFRESH TOKEN ERROR:", result.status, result.data);
+    request.end();
+
+  });
 
 }
+async function refreshAccessToken() {
+
+  if (!refreshToken) {
+
+    return null;
+
   }
+
+  const body = new URLSearchParams({
+
+    client_id: CLIENT_ID,
+
+    client_secret: CLIENT_SECRET,
+
+    refresh_token: refreshToken,
+
+    grant_type: "refresh_token"
+
+  }).toString();
+
+  const result = await googleRequest({
+
+    hostname: "oauth2.googleapis.com",
+
+    path: "/token",
+
+    method: "POST",
+
+    headers: {
+
+      "Content-Type": "application/x-www-form-urlencoded",
+
+      "Content-Length": Buffer.byteLength(body)
+
+    }
+
+  }, body);
+
+  if (result.status !== 200) {
+
+    console.error("TOKEN_REFRESH_FAILED", result.status);
+
+    return null;
+
+  }
+
+  const data = JSON.parse(result.data);
+
+  accessToken = data.access_token;
+
+  accessTokenExpiresAt =
+
+    Date.now() + Number(data.expires_in || 3600) * 1000;
 
   return accessToken;
 
 }
 
-const server = http.createServer(async (req, res) => {
-console.log("REQUEST:", req.method, req.url);
-  const host = req.headers.host || "nestview-tv.onrender.com";
+async function getAccessToken() {
 
-  const url = new URL(req.url, "https://" + host);
+  if (
+
+    accessToken &&
+
+    Date.now() < accessTokenExpiresAt - 60000
+
+  ) {
+
+    return accessToken;
+
+  }
+
+  return refreshAccessToken();
+
+}
+async function nestGet(path) {
+
+  const token = await getAccessToken();
+
+  if (!token) {
+
+    return {
+
+      status: 401,
+
+      data: JSON.stringify({
+
+        error: "Nest authorization required"
+
+      })
+
+    };
+
+  }
+
+  return googleRequest({
+
+    hostname: "smartdevicemanagement.googleapis.com",
+
+    path: path,
+
+    method: "GET",
+
+    headers: {
+
+      Authorization: "Bearer " + token
+
+    }
+
+  });
+
+}
+
+async function nestPost(path, data) {
+
+  const token = await getAccessToken();
+
+  if (!token) {
+
+    return {
+
+      status: 401,
+
+      data: JSON.stringify({
+
+        error: "Nest authorization required"
+
+      })
+
+    };
+
+  }
+
+  const body = JSON.stringify(data);
+
+  return googleRequest({
+
+    hostname: "smartdevicemanagement.googleapis.com",
+
+    path: path,
+
+    method: "POST",
+
+    headers: {
+
+      Authorization: "Bearer " + token,
+
+      "Content-Type": "application/json",
+
+      "Content-Length": Buffer.byteLength(body)
+
+    }
+
+  }, body);
+
+}
+const server = http.createServer(async (req, res) => {
+
+  const url = new URL(
+
+    req.url,
+
+    "https://nestview-tv.onrender.com"
+
+  );
+
+  console.log("REQUEST:", req.method, url.pathname);
 
   if (url.pathname === "/") {
 
-    sendJson(res, 200, {
+    return sendJson(res, 200, {
 
       app: "NestView TV",
 
-      status: "online",
+      edition: "Roku",
 
-      auth: "/auth",
+      version: "3",
 
-      devices: "/devices"
+      status: "online"
 
     });
 
-    return;
-
-  }
-if (url.pathname === "/token-status") {
-
-  sendJson(res, 200, {
-
-    refreshTokenLoaded: !!refreshToken,
-
-    accessTokenLoaded: !!accessToken
-
-  });
-
-  return;
-
-}
-  if (url.pathname === "/save-refresh-token") {
-
-  if (!refreshToken) {
-
-    sendJson(res, 404, { error: "No refresh token loaded" });
-
-    return;
-
   }
 
-  res.writeHead(200, {
-
-    "Content-Type": "text/plain",
-
-    "Cache-Control": "no-store"
-
-  });
-
-  res.end(refreshToken);
-
-  return;
-
-}
   if (url.pathname === "/health") {
 
-    sendJson(res, 200, {
+    return sendJson(res, 200, {
 
-      status: "ok"
+      status: "ok",
+
+      version: "3",
+
+      refreshTokenLoaded: !!refreshToken
 
     });
-
-    return;
 
   }
 
   if (url.pathname === "/auth") {
-
-    if (!CLIENT_ID || !CLIENT_SECRET || !PROJECT_ID) {
-
-      sendJson(res, 500, {
-
-        error: "Missing environment variables"
-
-      });
-
-      return;
-
-    }
 
     const authUrl = new URL(
 
@@ -361,367 +311,447 @@ if (url.pathname === "/token-status") {
 
     });
 
-    res.end();
-
-    return;
+    return res.end();
 
   }
-
-  if (url.pathname === "/oauth/callback") {
+    if (url.pathname === "/oauth/callback") {
 
     const code = url.searchParams.get("code");
 
     if (!code) {
 
-      sendJson(res, 400, {
+      return sendJson(res, 400, {
 
-        error: "Authorization code missing"
+        error: "Missing authorization code"
 
       });
-
-      return;
 
     }
 
     try {
 
-      const result = await postForm(
+      const body = new URLSearchParams({
 
-        "oauth2.googleapis.com",
+        client_id: CLIENT_ID,
 
-        "/token",
+        client_secret: CLIENT_SECRET,
 
-        {
+        code: code,
 
-          client_id: CLIENT_ID,
+        grant_type: "authorization_code",
 
-          client_secret: CLIENT_SECRET,
+        redirect_uri: REDIRECT_URI
 
-          code: code,
+      }).toString();
 
-          grant_type: "authorization_code",
+      const result = await googleRequest({
 
-          redirect_uri: REDIRECT_URI
+        hostname: "oauth2.googleapis.com",
+
+        path: "/token",
+
+        method: "POST",
+
+        headers: {
+
+          "Content-Type":
+
+            "application/x-www-form-urlencoded",
+
+          "Content-Length":
+
+            Buffer.byteLength(body)
 
         }
 
-      );
+      }, body);
 
       if (result.status !== 200) {
 
-        sendJson(res, 400, {
+        return sendJson(res, 400, {
 
-          error: "Token exchange failed",
-
-          details: result.data
+          error: "Google token exchange failed"
 
         });
 
-        return;
+      }
+
+      const data = JSON.parse(result.data);
+
+      accessToken = data.access_token;
+
+      accessTokenExpiresAt =
+
+        Date.now() +
+
+        Number(data.expires_in || 3600) * 1000;
+
+      if (data.refresh_token) {
+
+        refreshToken = data.refresh_token;
+
+        console.log("REFRESH_TOKEN_CAPTURED");
 
       }
 
-      const tokenData = JSON.parse(result.data);
+      res.writeHead(302, {
 
-      accessToken = tokenData.access_token;
-
-      if (tokenData.refresh_token) {
-
-        refreshToken = tokenData.refresh_token;
-
-console.log("REFRESH_TOKEN_CAPTURED"); 
-        
-      }
-
-
-
-    if (url.pathname === "/save-refresh-token") {
-
-  if (!refreshToken) {
-
-    sendJson(res, 404, { error: "No refresh token loaded" });
-
-    return;
-
-  }
-
-  res.writeHead(200, {
-
-    "Content-Type": "text/plain",
-
-    "Cache-Control": "no-store"
-
-  });
-
-  res.end(refreshToken);
-
-  return;
-
-}
-      res.writeHead(200, {
-
-        "Content-Type": "text/html"
+        Location: "/viewer?v=3"
 
       });
 
-      res.end(`
-
-        <!doctype html>
-
-        <html>
-
-          <head>
-
-            <meta name="viewport" content="width=device-width, initial-scale=1">
-
-            <title>NestView TV</title>
-
-          </head>
-
-          <body style="font-family:Arial;text-align:center;padding:50px;">
-
-            <h2>NestView TV Connected</h2>
-
-            <p>Google Nest authorization succeeded.</p>
-
-            <p>Your cameras are ready.</p>
-
-            <p><a href="/devices">Check Cameras</a></p>
-
-          </body>
-
-        </html>
-
-      `);
-
-      return;
+      return res.end();
 
     } catch (error) {
 
-      sendJson(res, 500, {
+      return sendJson(res, 500, {
 
-        error: "OAuth error",
-
-        details: error.message
+        error: error.message
 
       });
-
-      return;
 
     }
 
   }
-
-  if (url.pathname === "/devices") {
+    if (url.pathname === "/api/cameras") {
 
     try {
 
-      const token = await getAccessToken();
-
-      if (!token) {
-
-        res.writeHead(302, {
-
-          Location: "/auth"
-
-        });
-
-        res.end();
-
-        return;
-
-      }
-
-      const result = await googleGet(
+      const result = await nestGet(
 
         "/v1/enterprises/" +
 
         PROJECT_ID +
 
-        "/devices",
-
-        token
+        "/devices"
 
       );
 
-      let data;
+      if (result.status !== 200) {
 
-      try {
+        return sendJson(res, result.status, {
 
-        data = JSON.parse(result.data);
+          error: "Unable to load Nest cameras",
 
-      } catch {
+          authorize: "/auth"
 
-        data = {
-
-          raw: result.data
-
-        };
+        });
 
       }
 
-      sendJson(res, result.status, data);
+      const data = JSON.parse(result.data);
 
-      return;
+      const cameras = (data.devices || [])
 
-    } catch (error) {
+        .filter(device =>
 
-      sendJson(res, 500, {
+          device.type ===
 
-        error: "Unable to retrieve devices",
+          "sdm.devices.types.CAMERA"
 
-        details: error.message
+        )
+
+        .map((device, index) => {
+
+          const info =
+
+            device.traits &&
+
+            device.traits[
+
+              "sdm.devices.traits.Info"
+
+            ];
+
+          return {
+
+            device: device.name,
+
+            name:
+
+              (info && info.customName) ||
+
+              "Camera " + (index + 1)
+
+          };
+
+        });
+
+      return sendJson(res, 200, {
+
+        count: cameras.length,
+
+        cameras: cameras
 
       });
 
-      return;
+    } catch (error) {
+
+      return sendJson(res, 500, {
+
+        error: error.message
+
+      });
 
     }
 
   }
-    if (url.pathname === "/api/webrtc" && req.method === "POST") {
+    if (
 
-    try {
+    url.pathname === "/api/webrtc" &&
 
-      let body = "";
+    req.method === "POST"
 
-      req.on("data", chunk => {
+  ) {
 
-        body += chunk;
+    let body = "";
 
-      });
+    req.on("data", chunk => {
 
-      req.on("end", async () => {
+      body += chunk;
 
-        try {
+    });
 
-          const input = JSON.parse(body);
+    req.on("end", async () => {
 
-          const device = input.device;
+      try {
 
-          const offerSdp = input.offerSdp;
+        const input = JSON.parse(body);
 
-          if (!device || !offerSdp) {
+        if (!input.device || !input.offerSdp) {
 
-            sendJson(res, 400, {
+          return sendJson(res, 400, {
 
-              error: "device and offerSdp are required"
-
-            });
-
-            return;
-
-          }
-
-          const token = await getAccessToken();
-
-          if (!token) {
-
-            sendJson(res, 401, {
-
-              error: "Nest authorization required"
-
-            });
-
-            return;
-
-          }
-
-          const result = await googlePost(
-
-            "/v1/" + device + ":executeCommand",
-
-            token,
-
-            {
-
-              command: "sdm.devices.commands.CameraLiveStream.GenerateWebRtcStream",
-
-              params: {
-
-                offerSdp: offerSdp
-
-              }
-
-            }
-
-          );
-
-          let data;
-
-          try {
-
-            data = JSON.parse(result.data);
-
-          } catch {
-
-            data = {
-
-              raw: result.data
-
-            };
-
-          }
-
-          sendJson(res, result.status, data);
-
-        } catch (error) {
-
-          sendJson(res, 500, {
-
-            error: "WebRTC request failed",
-
-            details: error.message
+            error: "Missing device or offerSdp"
 
           });
 
         }
 
-      });
+        console.log(
 
-      return;
+          "START_CAMERA:",
 
-    } catch (error) {
+          input.device
 
-      sendJson(res, 500, {
+        );
 
-        error: "WebRTC route failed",
+        const result = await nestPost(
 
-        details: error.message
+          "/v1/" +
 
-      });
+          input.device +
 
-      return;
-    }
-    }
+          ":executeCommand",
 
-  if (url.pathname === "/viewer") {
+          {
 
-    res.writeHead(200, {
+            command:
 
-      "Content-Type": "text/html"
+              "sdm.devices.commands.CameraLiveStream.GenerateWebRtcStream",
+
+            params: {
+
+              offerSdp: input.offerSdp
+
+            }
+
+          }
+
+        );
+
+        let data;
+
+        try {
+
+          data = JSON.parse(result.data);
+
+        } catch {
+
+          data = {
+
+            error: "Invalid response from Google"
+
+          };
+
+        }
+
+        return sendJson(
+
+          res,
+
+          result.status,
+
+          data
+
+        );
+
+      } catch (error) {
+
+        return sendJson(res, 500, {
+
+          error: error.message
+
+        });
+
+      }
 
     });
 
-    res.end(`
+    return;
 
-      <!doctype html>
+  }
+    if (url.pathname === "/viewer") {
 
-      <html>
+    res.writeHead(200, {
 
-        <head>
+      "Content-Type": "text/html; charset=utf-8",
 
-          <meta name="viewport" content="width=device-width, initial-scale=1">
+      "Cache-Control":
 
-          <title>NestView TV</title>
+        "no-store, no-cache, must-revalidate"
 
-        </head>
+    });
 
-        <body style="background:#000;color:#fff;font-family:Arial;text-align:center;padding:40px;">
+    return res.end(`<!DOCTYPE html>
 
-          <h1>NestView TV</h1>
+<html>
 
-          <video
+<head>
+
+<meta charset="utf-8">
+
+<meta
+
+  name="viewport"
+
+  content="width=device-width,initial-scale=1"
+
+>
+
+<title>NestView TV</title>
+
+<style>
+
+* {
+
+  box-sizing: border-box;
+
+}
+
+body {
+
+  margin: 0;
+
+  padding: 20px;
+
+  background: #05070b;
+
+  color: white;
+
+  font-family: Arial, sans-serif;
+
+}
+
+.app {
+
+  max-width: 1100px;
+
+  margin: auto;
+
+}
+
+h1 {
+
+  margin-bottom: 4px;
+
+}
+
+.edition {
+
+  color: #9aa7b8;
+
+  margin-bottom: 15px;
+
+}
+
+video {
+
+  display: block;
+
+  width: 100%;
+
+  min-height: 250px;
+
+  max-height: 70vh;
+
+  background: black;
+
+  border-radius: 15px;
+
+}
+
+#cameraName {
+
+  font-size: 26px;
+
+  font-weight: bold;
+
+  margin-top: 14px;
+
+}
+
+#cameraNumber,
+
+#status {
+
+  color: #b7c0cc;
+
+  margin-top: 5px;
+
+}
+
+.controls {
+
+  margin-top: 15px;
+
+}
+
+button,
+
+select {
+
+  min-height: 52px;
+
+  margin: 4px;
+
+  padding: 10px 15px;
+
+  border: 0;
+
+  border-radius: 10px;
+
+  font-size: 16px;
+
+}
+
+</style>
+
+</head>
+
+<body>
+
+<div class="app">
+
+<h1>NestView TV</h1>
+
+<div class="edition">
+
+  Roku Edition • Version 3
+
+</div>
+
+<video
 
   id="camera"
 
@@ -729,179 +759,415 @@ console.log("REFRESH_TOKEN_CAPTURED");
 
   playsinline
 
-  muted
+  muted>
 
-  style="width:100%;max-width:1000px;background:#111;"
+</video>
 
-></video>
+<div id="cameraName">
 
-<p id="status">Ready to connect.</p>
+  Loading cameras...
 
-<button
-
-  id="startButton"
-
-  style="font-size:22px;padding:14px 28px;"
-
->
-
-  Start Camera
-
-</button>
-<div style="margin-top:18px;">
-
-  <button id="prevButton" style="font-size:20px;padding:12px 20px;">Previous</button>
-
-  <span id="cameraName" style="margin:0 15px;font-size:20px;">Camera 1</span>
-
-  <button id="nextButton" style="font-size:20px;padding:12px 20px;">Next</button>
-<button id="patrolButton" style="font-size:20px;padding:12px 20px;margin-left:12px;">Patrol OFF</button>
-<select id="patrolSpeed" style="font-size:20px;padding:12px;margin-left:12px;">
-
-  <option value="10000">10 sec</option>
-
-  <option value="15000" selected>15 sec</option>
-
-  <option value="30000">30 sec</option>
-
-  <option value="60000">60 sec</option>
-
-</select>
 </div>
 
+<div id="cameraNumber"></div>
+
+<div class="controls">
+
+  <button id="previous">
+
+    ◀ Previous
+
+  </button>
+
+  <button id="start">
+
+    Start Camera
+
+  </button>
+
+  <button id="next">
+
+    Next ▶
+
+  </button>
+
+  <button id="patrol">
+
+    Patrol OFF
+
+  </button>
+
+  <select id="speed">
+
+    <option value="10000">10 sec</option>
+
+    <option value="15000" selected>
+
+      15 sec
+
+    </option>
+
+    <option value="30000">30 sec</option>
+
+    <option value="60000">60 sec</option>
+
+  </select>
+
+</div>
+
+<div id="status">
+
+  Loading cameras...
+
+</div>
 <script>
 
-const startButton = document.getElementById("startButton");
+const video =
 
-const statusText = document.getElementById("status");
+  document.getElementById("camera");
 
-const video = document.getElementById("camera");
-const prevButton = document.getElementById("prevButton");
+const cameraName =
 
-const nextButton = document.getElementById("nextButton");
-const patrolButton = document.getElementById("patrolButton");
-const cameraName = document.getElementById("cameraName");
+  document.getElementById("cameraName");
+
+const cameraNumber =
+
+  document.getElementById("cameraNumber");
+
+const statusText =
+
+  document.getElementById("status");
+
+const startButton =
+
+  document.getElementById("start");
+
+const nextButton =
+
+  document.getElementById("next");
+
+const previousButton =
+
+  document.getElementById("previous");
+
+const patrolButton =
+
+  document.getElementById("patrol");
+
+const speedSelect =
+
+  document.getElementById("speed");
 
 let cameras = [];
 
-let currentCameraIndex = 0;
-let activePeer = null;
+let currentIndex = 0;
+
+let peer = null;
+
 let patrolTimer = null;
-startButton.addEventListener("click", async function () {
 
-  startButton.disabled = true;
+let requestNumber = 0;
 
-  statusText.textContent = "Finding cameras...";
+async function loadCameras() {
 
-  try {
+  const response = await fetch(
 
-    const devicesResponse = await fetch("/devices");
+    "/api/cameras?t=" + Date.now(),
 
-    const devicesData = await devicesResponse.json();
+    {
 
-    if (!devicesData.devices || devicesData.devices.length === 0) {
-
-      throw new Error("No cameras found.");
+      cache: "no-store"
 
     }
-    cameras = devicesData.devices.filter(function (device) {
 
-  return device.type === "sdm.devices.types.CAMERA";
+  );
 
-});
+  if (response.status === 401) {
 
-if (cameras.length === 0) {
+    window.location.href = "/auth";
 
-  throw new Error("No compatible cameras found.");
-
-}
-
-const camera = cameras[currentCameraIndex];
-
-cameraName.textContent = camera.traits["sdm.devices.traits.Info"].customName + " (" + (currentCameraIndex + 1) + " of " + cameras.length + ")";
-if (video.srcObject) {
-
-  video.srcObject.getTracks().forEach(track => track.stop());
-
-  video.srcObject = null;
-
-}
-    statusText.textContent = "Starting live camera...";
-if (activePeer) {
-
-  activePeer.close();
-
-  activePeer = null;
-}
-    const peer = new RTCPeerConnection();
-activePeer = peer;
-    
-    peer.addTransceiver("audio", {
-
-  direction: "recvonly"
-
-});
-
-peer.addTransceiver("video", {
-
-  direction: "recvonly"
-
-});
-
-peer.createDataChannel("dataSendChannel");
-
-peer.ontrack = function (event) {
-
-  if (event.streams && event.streams[0]) {
-
-    video.srcObject = event.streams[0];
+    return false;
 
   }
 
-};
-      
+  const data = await response.json();
 
+  if (!response.ok) {
 
+    throw new Error(
 
-    const offer = await peer.createOffer();
+      data.error ||
 
-    await peer.setLocalDescription(offer);
+      "Unable to load cameras"
 
-    const response = await fetch("/api/webrtc", {
+    );
 
-      method: "POST",
+  }
 
-      headers: {
+  cameras = data.cameras || [];
 
-        "Content-Type": "application/json"
+  if (!cameras.length) {
 
-      },
+    throw new Error(
 
-      body: JSON.stringify({
+      "No Nest cameras found"
 
-        device: camera.name,
+    );
 
-        offerSdp: peer.localDescription.sdp
+  }
 
-      })
+  showCamera();
 
-    });
+  statusText.textContent =
 
-    const result = await response.json();
+    cameras.length + " cameras ready";
+
+  return true;
+
+}
+
+function showCamera() {
+
+  if (!cameras.length) {
+
+    return;
+
+  }
+
+  cameraName.textContent =
+
+    cameras[currentIndex].name;
+
+  cameraNumber.textContent =
+
+    (currentIndex + 1) +
+
+    " of " +
+
+    cameras.length;
+
+}
+
+function closeCurrentStream() {
+
+  if (peer) {
+
+    try {
+
+      peer.close();
+
+    } catch (error) {}
+
+    peer = null;
+
+  }
+
+  if (video.srcObject) {
+
+    video.srcObject
+
+      .getTracks()
+
+      .forEach(track => {
+
+        try {
+
+          track.stop();
+
+        } catch (error) {}
+
+      });
+
+    video.srcObject = null;
+
+  }
+
+}
+async function startCamera() {
+
+  try {
+
+    if (!cameras.length) {
+
+      const loaded = await loadCameras();
+
+      if (!loaded) {
+
+        return;
+
+      }
+
+    }
+
+    const thisRequest =
+
+      ++requestNumber;
+
+    const selectedCamera =
+
+      cameras[currentIndex];
+
+    showCamera();
+
+    statusText.textContent =
+
+      "Opening " +
+
+      selectedCamera.name +
+
+      "...";
+
+    closeCurrentStream();
+
+    const newPeer =
+
+      new RTCPeerConnection();
+
+    peer = newPeer;
+
+    newPeer.addTransceiver(
+
+      "audio",
+
+      {
+
+        direction: "recvonly"
+
+      }
+
+    );
+
+    newPeer.addTransceiver(
+
+      "video",
+
+      {
+
+        direction: "recvonly"
+
+      }
+
+    );
+
+    newPeer.createDataChannel(
+
+      "dataSendChannel"
+
+    );
+
+    newPeer.ontrack = event => {
+
+      if (
+
+        thisRequest === requestNumber &&
+
+        event.streams &&
+
+        event.streams[0]
+
+      ) {
+
+        video.srcObject =
+
+          event.streams[0];
+
+        video.play().catch(() => {});
+
+      }
+
+    };
+
+    const offer =
+
+      await newPeer.createOffer();
+
+    await newPeer.setLocalDescription(
+
+      offer
+
+    );
+
+    const response = await fetch(
+
+      "/api/webrtc",
+
+      {
+
+        method: "POST",
+
+        headers: {
+
+          "Content-Type":
+
+            "application/json"
+
+        },
+
+        body: JSON.stringify({
+
+          device:
+
+            selectedCamera.device,
+
+          offerSdp:
+
+            newPeer.localDescription.sdp
+
+        })
+
+      }
+
+    );
+
+    const result =
+
+      await response.json();
+
+    if (
+
+      thisRequest !== requestNumber
+
+    ) {
+
+      try {
+
+        newPeer.close();
+
+      } catch (error) {}
+
+      return;
+
+    }
 
     if (!response.ok) {
 
-      throw new Error(JSON.stringify(result));
+      throw new Error(
+
+        result.error ||
+
+        "Unable to start camera"
+
+      );
 
     }
 
-    if (!result.results || !result.results.answerSdp) {
+    if (
 
-      throw new Error("Google did not return a WebRTC answer.");
+      !result.results ||
+
+      !result.results.answerSdp
+
+    ) {
+
+      throw new Error(
+
+        "No WebRTC answer received"
+
+      );
 
     }
 
-    await peer.setRemoteDescription({
+    await newPeer.setRemoteDescription({
 
       type: "answer",
 
@@ -909,27 +1175,56 @@ peer.ontrack = function (event) {
 
     });
 
-    statusText.textContent = "Live";
-startButton.disabled = false;
+    statusText.textContent =
+
+      selectedCamera.name +
+
+      " • Live";
+
   } catch (error) {
 
-    statusText.textContent = "Error: " + error.message;
+    console.error(error);
 
-    startButton.disabled = false;
+    statusText.textContent =
+
+      "Error: " + error.message;
 
   }
 
-});
-nextButton.addEventListener("click", function () {
+}
+async function nextCamera() {
 
-  currentCameraIndex = (currentCameraIndex + 1) % cameras.length;
-cameraName.textContent = cameras[currentCameraIndex].traits["sdm.devices.traits.Info"].customName + " (" + (currentCameraIndex + 1) + " of " + cameras.length + ")";w
-  startButton.disabled = false;
+  if (!cameras.length) return;
 
-startButton.click();
+  currentIndex =
 
-});
-patrolButton.addEventListener("click", function () {
+    (currentIndex + 1) %
+
+    cameras.length;
+
+  showCamera();
+
+  await startCamera();
+
+}
+
+async function previousCamera() {
+
+  if (!cameras.length) return;
+
+  currentIndex =
+
+    (currentIndex - 1 + cameras.length) %
+
+    cameras.length;
+
+  showCamera();
+
+  await startCamera();
+
+}
+
+function stopPatrol() {
 
   if (patrolTimer) {
 
@@ -937,46 +1232,104 @@ patrolButton.addEventListener("click", function () {
 
     patrolTimer = null;
 
-    patrolButton.textContent = "Patrol OFF";
+  }
+
+  patrolButton.textContent =
+
+    "Patrol OFF";
+
+}
+
+function startPatrol() {
+
+  stopPatrol();
+
+  patrolButton.textContent =
+
+    "Patrol ON";
+
+  patrolTimer = setInterval(
+
+    nextCamera,
+
+    Number(speedSelect.value)
+
+  );
+
+}
+
+startButton.onclick = startCamera;
+
+nextButton.onclick = nextCamera;
+
+previousButton.onclick = previousCamera;
+
+patrolButton.onclick = () => {
+
+  if (patrolTimer) {
+
+    stopPatrol();
 
   } else {
 
-    patrolTimer = setInterval(function () {
-
-      nextButton.click();
-
-    }, Number(document.getElementById("patrolSpeed").value) );
-
-    patrolButton.textContent = "Patrol ON";
+    startPatrol();
 
   }
+
+};
+
+speedSelect.onchange = () => {
+
+  if (patrolTimer) {
+
+    startPatrol();
+
+  }
+
+};
+
+document.addEventListener(
+
+  "keydown",
+
+  event => {
+
+    if (event.key === "ArrowRight") {
+
+      nextCamera();
+
+    }
+
+    if (event.key === "ArrowLeft") {
+
+      previousCamera();
+
+    }
+
+  }
+
+);
+
+loadCameras().catch(error => {
+
+  statusText.textContent =
+
+    "Nest connection required: " +
+
+    error.message;
 
 });
-
-  
-
-
-
-
-  
-
-  
-
-  
-
-
 </script>
 
-        </body>
+</div>
 
-      </html>
+</body>
 
-    `);
-
-    return;
+</html>`);
 
   }
-  sendJson(res, 404, {
+
+  return sendJson(res, 404, {
 
     error: "Not found"
 
@@ -986,6 +1339,12 @@ patrolButton.addEventListener("click", function () {
 
 server.listen(PORT, "0.0.0.0", () => {
 
-  console.log("NestView TV server running on port " + PORT);
+  console.log(
+
+    "NestView TV Roku backend VERSION 3 running on port " +
+
+    PORT
+
+  );
 
 });
