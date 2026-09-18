@@ -827,8 +827,8 @@ func start(
 		string(body),
 	)
 
-	var rawRequest
-		map[string]interface{}
+	var rawRequest map[string]interface{}
+	
 
 	if err :=
 		json.Unmarshal(
