@@ -141,6 +141,48 @@ func firstString(
 	return ""
 }
 
+func findAnswerSDP(value interface{}) string {
+	switch v := value.(type) {
+
+	case map[string]interface{}:
+		for key, item := range v {
+			lowerKey := strings.ToLower(key)
+
+			if lowerKey == "answersdp" ||
+				lowerKey == "answer_sdp" ||
+				lowerKey == "answer" ||
+				lowerKey == "sdp" {
+				if text, ok := item.(string); ok {
+					if strings.Contains(text, "v=0") {
+						return text
+					}
+				}
+			}
+		}
+
+		for _, item := range v {
+			if answer := findAnswerSDP(item); answer != "" {
+				return answer
+			}
+		}
+
+	case []interface{}:
+		for _, item := range v {
+			if answer := findAnswerSDP(item); answer != "" {
+				return answer
+			}
+		}
+
+	case string:
+		if strings.Contains(v, "v=0") &&
+			strings.Contains(v, "m=video") {
+			return v
+		}
+	}
+
+	return ""
+}
+
 func waitForICE(pc *webrtc.PeerConnection) {
 	done := webrtc.GatheringCompletePromise(pc)
 
@@ -153,7 +195,6 @@ func waitForICE(pc *webrtc.PeerConnection) {
 func startCamera(camera Camera) (string, error) {
 	mediaEngine := &webrtc.MediaEngine{}
 
-	// OPUS audio
 	err := mediaEngine.RegisterCodec(
 		webrtc.RTPCodecParameters{
 			RTPCodecCapability: webrtc.RTPCodecCapability{
@@ -169,7 +210,6 @@ func startCamera(camera Camera) (string, error) {
 		return "", err
 	}
 
-	// H264 video
 	err = mediaEngine.RegisterCodec(
 		webrtc.RTPCodecParameters{
 			RTPCodecCapability: webrtc.RTPCodecCapability{
@@ -199,9 +239,6 @@ func startCamera(camera Camera) (string, error) {
 	}
 	defer pc.Close()
 
-	// Nest requires:
-	// audio -> video -> application
-
 	_, err = pc.AddTransceiverFromKind(
 		webrtc.RTPCodecTypeAudio,
 		webrtc.RTPTransceiverInit{
@@ -222,7 +259,6 @@ func startCamera(camera Camera) (string, error) {
 		return "", err
 	}
 
-	// Creates application m-line.
 	_, err = pc.CreateDataChannel(
 		"nestview",
 		nil,
@@ -243,6 +279,7 @@ func startCamera(camera Camera) (string, error) {
 	waitForICE(pc)
 
 	local := pc.LocalDescription()
+
 	if local == nil {
 		return "", fmt.Errorf("local SDP missing")
 	}
@@ -314,6 +351,7 @@ func startCamera(camera Camera) (string, error) {
 	}
 
 	data, err := json.Marshal(payload)
+
 	if err != nil {
 		return "", err
 	}
@@ -323,15 +361,28 @@ func startCamera(camera Camera) (string, error) {
 		"application/json",
 		bytes.NewReader(data),
 	)
+
 	if err != nil {
 		return "", err
 	}
+
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
+
 	if err != nil {
 		return "", err
 	}
+
+	log.Printf(
+		"Nest backend HTTP status: %d",
+		resp.StatusCode,
+	)
+
+	log.Printf(
+		"Nest backend response body: %s",
+		string(body),
+	)
 
 	if resp.StatusCode < 200 ||
 		resp.StatusCode >= 300 {
@@ -342,27 +393,29 @@ func startCamera(camera Camera) (string, error) {
 		)
 	}
 
-	var result map[string]interface{}
+	var result interface{}
 
 	if err := json.Unmarshal(
 		body,
 		&result,
 	); err != nil {
-		return "", err
+		return "", fmt.Errorf(
+			"could not decode Nest response: %w",
+			err,
+		)
 	}
 
-	answer := firstString(
-		result,
-		"answerSdp",
-		"answer",
-		"sdp",
-	)
+	answer := findAnswerSDP(result)
 
 	if answer == "" {
 		return "", fmt.Errorf(
-			"Nest response did not contain answer SDP",
+			"Nest response did not contain recognizable answer SDP",
 		)
 	}
+
+	log.Println(
+		"Nest answer SDP found",
+	)
 
 	err = pc.SetRemoteDescription(
 		webrtc.SessionDescription{
@@ -370,12 +423,13 @@ func startCamera(camera Camera) (string, error) {
 			SDP:  answer,
 		},
 	)
+
 	if err != nil {
 		return "", err
 	}
 
 	log.Println(
-		"Nest accepted Pion H264 offer",
+		"Nest accepted Pion H264 offer and remote SDP",
 	)
 
 	return answer, nil
@@ -391,7 +445,7 @@ func health(
 		map[string]interface{}{
 			"status":  "ok",
 			"bridge":  "pion-h264",
-			"version": 4,
+			"version": 5,
 		},
 	)
 }
@@ -429,8 +483,6 @@ func start(
 		string(body),
 	)
 
-	// Decode into a generic map so we can normalize
-	// accidental whitespace in Shortcut field names.
 	var rawRequest map[string]interface{}
 
 	if err := json.Unmarshal(
@@ -457,6 +509,7 @@ func start(
 		}
 
 		switch v := value.(type) {
+
 		case float64:
 			cameraIndex = int(v)
 			cameraFound = true
@@ -578,14 +631,14 @@ func main() {
 					"engine": "Pion WebRTC",
 					"h264": true,
 					"opus": true,
-					"version": 4,
+					"version": 5,
 				},
 			)
 		},
 	)
 
 	log.Println(
-		"NestView TV Pion H264 Bridge VERSION 4 " +
+		"NestView TV Pion H264 Bridge VERSION 5 " +
 			"running on port " + port,
 	)
 
