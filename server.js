@@ -922,10 +922,8 @@ startButton.disabled = false;
 });
 nextButton.addEventListener("click", function () {
 
-  currentCameraIndex = (currentCameraIndex + 1) % cameras.length;
-
-  cameraName.textContent = "Camera " + (currentCameraIndex + 1);
-
+  currentCameraIndex = (currentCameraIndex + 1) % cameras.length;by
+cameraName.textContent = cameras[currentCameraIndex].traits["sdm.devices.traits.Info"].customName + " (" + (currentCameraIndex + 1) + " of " + cameras.length + ")";w
   startButton.click();
 
 });
