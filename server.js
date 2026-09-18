@@ -924,7 +924,9 @@ nextButton.addEventListener("click", function () {
 
   currentCameraIndex = (currentCameraIndex + 1) % cameras.length;
 cameraName.textContent = cameras[currentCameraIndex].traits["sdm.devices.traits.Info"].customName + " (" + (currentCameraIndex + 1) + " of " + cameras.length + ")";w
-  startButton.click();
+  startButton.disabled = false;
+
+startButton.click();
 
 });
 patrolButton.addEventListener("click", function () {
