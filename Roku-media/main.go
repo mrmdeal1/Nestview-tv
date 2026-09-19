@@ -2421,7 +2421,64 @@ func diagnoseTS(data []byte) TSDiagnostics {
 
 	return d
 }
+type TSReadbackDiagnostics struct {
+	Success          bool   `json:"success"`
+	AccessUnits      int    `json:"accessUnits"`
+	RandomAccessUnits int   `json:"randomAccessUnits"`
+	FirstPTS         int64  `json:"firstPTS"`
+	LastPTS          int64  `json:"lastPTS"`
+	FirstDTS         int64  `json:"firstDTS"`
+	LastDTS          int64  `json:"lastDTS"`
+	FirstNAL         string `json:"firstNAL"`
+	LastNAL          string `json:"lastNAL"`
+	Error            string `json:"error,omitempty"`
+}
 
+func readbackTS(data []byte) TSReadbackDiagnostics {
+	d := TSReadbackDiagnostics{
+		FirstPTS: -1,
+		LastPTS:  -1,
+		FirstDTS: -1,
+		LastDTS:  -1,
+	}
+
+	reader, err := mpegts.NewReader(bytes.NewReader(data))
+	if err != nil {
+		d.Error = err.Error()
+		return d
+	}
+
+	for {
+		au, err := reader.NextAccessUnit()
+		if err == io.EOF {
+			break
+		}
+
+		if err != nil {
+			d.Error = err.Error()
+			return d
+		}
+
+		d.AccessUnits++
+
+		if au.RandomAccessIndicator {
+			d.RandomAccessUnits++
+		}
+
+		if d.FirstPTS < 0 {
+			d.FirstPTS = au.PTS
+			d.FirstDTS = au.DTS
+			d.FirstNAL = naluSummary(au.Data)
+		}
+
+		d.LastPTS = au.PTS
+		d.LastDTS = au.DTS
+		d.LastNAL = naluSummary(au.Data)
+	}
+
+	d.Success = d.AccessUnits > 0
+	return d
+}
 func (s *StreamSession) newSegmentLocked() error {
 	buf := &bytes.Buffer{}
 
@@ -4302,6 +4359,61 @@ func muxDiagnosticsHandler(
 		},
 	)
 }
+func readbackDebugHandler(
+	w http.ResponseWriter,
+	r *http.Request,
+) {
+	session := getSession()
+
+	if session == nil {
+		writeJSON(
+			w,
+			http.StatusNotFound,
+			map[string]interface{}{
+				"error":   "no active stream",
+				"version": 20,
+			},
+		)
+		return
+	}
+
+	session.mu.RLock()
+
+	if len(session.Segments) == 0 {
+		session.mu.RUnlock()
+
+		writeJSON(
+			w,
+			http.StatusNotFound,
+			map[string]interface{}{
+				"error":   "no completed TS segments",
+				"version": 20,
+			},
+		)
+		return
+	}
+
+	segment := copyHLSSegment(
+		session.Segments[len(session.Segments)-1],
+	)
+
+	session.mu.RUnlock()
+
+	diagnostics := readbackTS(segment.Data)
+
+	writeJSON(
+		w,
+		http.StatusOK,
+		map[string]interface{}{
+			"version":     20,
+			"sequence":    segment.Sequence,
+			"generation":  segment.Generation,
+			"duration":    segment.Duration,
+			"bytes":       len(segment.Data),
+			"diagnostics": diagnostics,
+		},
+	)
+}
 func tsDebugHandler(
 	w http.ResponseWriter,
 	r *http.Request,
@@ -5101,6 +5213,10 @@ func main() {
 		"/debug/mux",
 		muxDiagnosticsHandler,
 	)
+	http.HandleFunc(
+    "/debug/readback",
+    readbackDebugHandler,
+)
 
 	http.HandleFunc(
 		"/live/index.m3u8",
