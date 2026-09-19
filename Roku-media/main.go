@@ -2390,9 +2390,7 @@ func start(
 
 	if len(session.Segments) > 0 {
 		diagnostic =
-			session.Segments[
-				len(session.Segments)-1
-			].Diagnostics
+    session.Segments[len(session.Segments)-1].Diagnostics
 	}
 
 	session.mu.RUnlock()
