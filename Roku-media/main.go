@@ -1722,7 +1722,8 @@ func parseH264SPS(
 			"parsed SPS produced invalid dimensions"
 	}
 
-	return y
+	return d
+}
 	func (s *StreamSession) updateH264DiagnosticsLocked(
 	accessUnit []byte,
 	pts int64,
