@@ -500,8 +500,7 @@ func splitAnnexB(
 					[]byte(nil),
 					data[
 						naluStart:
-						naluEnd
-					]...,
+						naluEnd]...,
 				),
 			)
 		}
@@ -984,8 +983,7 @@ func diagnoseTS(
 							binary.BigEndian.Uint16(
 								payload[
 									programPos:
-									programPos+2
-								],
+									programPos+2],
 							)
 
 						programPID :=
@@ -993,8 +991,7 @@ func diagnoseTS(
 								binary.BigEndian.Uint16(
 									payload[
 										programPos+2:
-										programPos+4
-									],
+										programPos+4],
 								) & 0x1FFF,
 							)
 
@@ -1062,8 +1059,7 @@ func diagnoseTS(
 								binary.BigEndian.Uint16(
 									payload[
 										esPos+1:
-										esPos+3
-									],
+										esPos+3],
 								) & 0x1FFF,
 							)
 
@@ -1072,8 +1068,7 @@ func diagnoseTS(
 								binary.BigEndian.Uint16(
 									payload[
 										esPos+3:
-										esPos+5
-									],
+										esPos+5],
 								) & 0x0FFF,
 							)
 
