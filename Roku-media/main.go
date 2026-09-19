@@ -2461,9 +2461,9 @@ func readbackTS(data []byte) TSReadbackDiagnostics {
 
 		d.AccessUnits++
 
-		if au.RandomAccessIndicator {
-			d.RandomAccessUnits++
-		}
+		
+			
+		
 
 		if d.FirstPTS < 0 {
 			d.FirstPTS = au.PTS
