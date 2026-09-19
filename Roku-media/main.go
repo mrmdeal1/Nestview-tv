@@ -52,8 +52,8 @@ type MediaStats struct {
 	AudioPackets uint64
 	AudioBytes   uint64
 
-	AccessUnits uint64
-	HLSSegments uint64
+	AccessUnits  uint64
+	HLSSegments  uint64
 	EmptyPackets uint64
 
 	ValidatedTS     uint64
@@ -64,6 +64,10 @@ type MediaStats struct {
 	CodecChanges uint64
 
 	PlaylistGenerations uint64
+
+	DuplicateSPSRemoved uint64
+	DuplicatePPSRemoved uint64
+	CleanedAccessUnits  uint64
 }
 
 type TSDiagnostics struct {
@@ -300,6 +304,8 @@ type StreamSession struct {
 	normalizedPTS int64
 
 	lastNALSummary string
+
+	lastCleanedNALSummary string
 
 	ready chan struct{}
 
@@ -700,6 +706,132 @@ func inspectAccessUnit(
 	return
 }
 
+func canonicalizeH264AccessUnit(
+	data []byte,
+) (
+	cleaned []byte,
+	duplicateSPS int,
+	duplicatePPS int,
+	changed bool,
+) {
+	nalus :=
+		splitAnnexB(data)
+
+	if len(nalus) == 0 {
+		return data,
+			0,
+			0,
+			false
+	}
+
+	var lastSPS []byte
+	var lastPPS []byte
+
+	spsCount := 0
+	ppsCount := 0
+
+	otherNALUs :=
+		make(
+			[][]byte,
+			0,
+			len(nalus),
+		)
+
+	for _, nalu := range nalus {
+		if len(nalu) == 0 {
+			continue
+		}
+
+		nalType :=
+			nalu[0] & 0x1F
+
+		switch nalType {
+
+		case 7:
+			spsCount++
+
+			lastSPS =
+				append(
+					[]byte(nil),
+					nalu...,
+				)
+
+		case 8:
+			ppsCount++
+
+			lastPPS =
+				append(
+					[]byte(nil),
+					nalu...,
+				)
+
+		default:
+			otherNALUs =
+				append(
+					otherNALUs,
+					nalu,
+				)
+		}
+	}
+
+	if spsCount > 1 {
+		duplicateSPS =
+			spsCount - 1
+	}
+
+	if ppsCount > 1 {
+		duplicatePPS =
+			ppsCount - 1
+	}
+
+	if duplicateSPS == 0 &&
+		duplicatePPS == 0 {
+
+		return data,
+			0,
+			0,
+			false
+	}
+
+	if len(lastSPS) > 0 {
+		cleaned =
+			append(
+				cleaned,
+				annexB(lastSPS)...,
+			)
+	}
+
+	if len(lastPPS) > 0 {
+		cleaned =
+			append(
+				cleaned,
+				annexB(lastPPS)...,
+			)
+	}
+
+	for _, nalu :=
+		range otherNALUs {
+
+		cleaned =
+			append(
+				cleaned,
+				annexB(nalu)...,
+			)
+	}
+
+	if len(cleaned) == 0 {
+		return data,
+			0,
+			0,
+			false
+	}
+
+	return cleaned,
+		duplicateSPS,
+		duplicatePPS,
+		true
+}
+
 func naluSummary(
 	data []byte,
 ) string {
@@ -739,7 +871,6 @@ func naluSummary(
 		",",
 	)
 }
-
 func stripAnnexBStartCode(
 	data []byte,
 ) []byte {
@@ -1724,7 +1855,8 @@ func parseH264SPS(
 
 	return d
 }
-	func (s *StreamSession) updateH264DiagnosticsLocked(
+
+func (s *StreamSession) updateH264DiagnosticsLocked(
 	accessUnit []byte,
 	pts int64,
 ) {
@@ -1767,7 +1899,7 @@ func parseH264SPS(
 	if !diagnostics.Valid {
 		if hasSPS {
 			log.Printf(
-				"VERSION 15 H264 SPS PARSE ERROR: %s",
+				"VERSION 16 H264 SPS PARSE ERROR: %s",
 				diagnostics.Error,
 			)
 		}
@@ -1790,7 +1922,7 @@ func parseH264SPS(
 		s.currentGeneration = 0
 
 		log.Printf(
-			"VERSION 15 H264 INITIAL CODEC: %s profileName=%s levelName=%s SPS=%d PPS=%d IDR=%t PTS=%d",
+			"VERSION 16 H264 INITIAL CODEC: %s profileName=%s levelName=%s SPS=%d PPS=%d IDR=%t PTS=%d",
 			codecSignatureString(
 				signature,
 			),
@@ -1813,7 +1945,7 @@ func parseH264SPS(
 	) {
 		if !s.h264Logged {
 			log.Printf(
-				"VERSION 15 H264 CODEC: %s",
+				"VERSION 16 H264 CODEC: %s",
 				codecSignatureString(
 					signature,
 				),
@@ -1835,7 +1967,7 @@ func parseH264SPS(
 		)
 
 	log.Printf(
-		"VERSION 15 CODEC CHANGE DETECTED #%d: FROM [%s] TO [%s] IDR=%t PTS=%d",
+		"VERSION 16 CODEC CHANGE DETECTED #%d: FROM [%s] TO [%s] IDR=%t PTS=%d",
 		changeNumber,
 		codecSignatureString(
 			oldCodec,
@@ -1852,7 +1984,7 @@ func parseH264SPS(
 		s.currentBuffer.Len() > 0 {
 
 		log.Printf(
-			"VERSION 15 closing old codec segment before SPS transition: sequence=%d generation=%d",
+			"VERSION 16 closing old codec segment before SPS transition: sequence=%d generation=%d",
 			s.NextSequence,
 			s.currentGeneration,
 		)
@@ -1908,7 +2040,7 @@ func parseH264SPS(
 	}
 
 	log.Printf(
-		"VERSION 15 HLS DISCONTINUITY ARMED: generation=%d nextSequence=%d",
+		"VERSION 16 HLS DISCONTINUITY ARMED: generation=%d nextSequence=%d",
 		s.currentGeneration,
 		s.NextSequence,
 	)
@@ -1934,7 +2066,7 @@ func (s *StreamSession) cacheParametersLocked(
 			)
 
 		log.Printf(
-			"VERSION 15 cached SPS: %d bytes",
+			"VERSION 16 cached SPS: %d bytes",
 			len(s.sps),
 		)
 	}
@@ -1953,7 +2085,7 @@ func (s *StreamSession) cacheParametersLocked(
 			)
 
 		log.Printf(
-			"VERSION 15 cached PPS: %d bytes",
+			"VERSION 16 cached PPS: %d bytes",
 			len(s.pps),
 		)
 	}
@@ -1975,7 +2107,7 @@ func (s *StreamSession) normalizeTimestamp(
 			ptsOffset
 
 		log.Printf(
-			"VERSION 15 timestamp clock started: RTP=%d PTS=%d",
+			"VERSION 16 timestamp clock started: RTP=%d PTS=%d",
 			rtpTimestamp,
 			s.normalizedPTS,
 		)
@@ -1996,7 +2128,7 @@ func (s *StreamSession) normalizeTimestamp(
 		)
 
 		log.Printf(
-			"VERSION 15 timestamp discontinuity: previous=%d current=%d rawDelta=%d",
+			"VERSION 16 timestamp discontinuity: previous=%d current=%d rawDelta=%d",
 			s.lastRTPTimestamp,
 			rtpTimestamp,
 			delta,
@@ -2068,7 +2200,6 @@ func parsePCR(
 
 	return base
 }
-
 func diagnoseTS(
 	data []byte,
 ) TSDiagnostics {
@@ -2554,7 +2685,7 @@ func (s *StreamSession) newSegmentLocked() error {
 	}
 
 	log.Printf(
-		"VERSION 15 SEGMENT OPEN: sequence=%d generation=%d codec=[%s] discontinuity=%t",
+		"VERSION 16 SEGMENT OPEN: sequence=%d generation=%d codec=[%s] discontinuity=%t",
 		s.NextSequence,
 		s.currentGeneration,
 		codecSignatureString(
@@ -2628,7 +2759,7 @@ func (s *StreamSession) finishSegmentLocked() {
 		)
 
 		log.Printf(
-			"VERSION 15 TS MEDIA VALID: packets=%d bytes=%d PAT=%d PMT=%d videoPID=%d streamType=0x%02x PES=%d PTS=%d DTS=%d PCR=%d continuityErrors=%d",
+			"VERSION 16 TS MEDIA VALID: packets=%d bytes=%d PAT=%d PMT=%d videoPID=%d streamType=0x%02x PES=%d PTS=%d DTS=%d PCR=%d continuityErrors=%d",
 			diagnostics.Packets,
 			diagnostics.Bytes,
 			diagnostics.PATPackets,
@@ -2648,7 +2779,7 @@ func (s *StreamSession) finishSegmentLocked() {
 		)
 
 		log.Printf(
-			"VERSION 15 TS MEDIA INVALID: error=%s packets=%d PAT=%d PMT=%d videoPID=%d streamType=0x%02x PES=%d PTS=%d backwardPTS=%d PCR=%d continuityErrors=%d transportErrors=%d",
+			"VERSION 16 TS MEDIA INVALID: error=%s packets=%d PAT=%d PMT=%d videoPID=%d streamType=0x%02x PES=%d PTS=%d backwardPTS=%d PCR=%d continuityErrors=%d transportErrors=%d",
 			validateErr,
 			diagnostics.Packets,
 			diagnostics.PATPackets,
@@ -2724,7 +2855,7 @@ func (s *StreamSession) finishSegmentLocked() {
 	)
 
 	log.Printf(
-		"VERSION 15 HLS SEGMENT READY: sequence=%d generation=%d duration=%.3f size=%d mediaValid=%t discontinuityBefore=%t codec=[%s]",
+		"VERSION 16 HLS SEGMENT READY: sequence=%d generation=%d duration=%.3f size=%d mediaValid=%t discontinuityBefore=%t codec=[%s]",
 		segment.Sequence,
 		segment.Generation,
 		segment.Duration,
@@ -2770,6 +2901,56 @@ func (s *StreamSession) keyframeAccessUnitLocked(
 		return accessUnit
 	}
 
+	before :=
+		naluSummary(
+			accessUnit,
+		)
+
+	cleaned,
+		duplicateSPS,
+		duplicatePPS,
+		changed :=
+		canonicalizeH264AccessUnit(
+			accessUnit,
+		)
+
+	if changed {
+		accessUnit =
+			cleaned
+
+		atomic.AddUint64(
+			&s.Stats.CleanedAccessUnits,
+			1,
+		)
+
+		if duplicateSPS > 0 {
+			atomic.AddUint64(
+				&s.Stats.DuplicateSPSRemoved,
+				uint64(
+					duplicateSPS,
+				),
+			)
+		}
+
+		if duplicatePPS > 0 {
+			atomic.AddUint64(
+				&s.Stats.DuplicatePPSRemoved,
+				uint64(
+					duplicatePPS,
+				),
+			)
+		}
+
+		_,
+			hasSPS,
+			hasPPS,
+			_,
+			_ =
+			inspectAccessUnit(
+				accessUnit,
+			)
+	}
+
 	var out []byte
 
 	if !hasSPS &&
@@ -2797,6 +2978,24 @@ func (s *StreamSession) keyframeAccessUnitLocked(
 			out,
 			accessUnit...,
 		)
+
+	after :=
+		naluSummary(
+			out,
+		)
+
+	s.lastCleanedNALSummary =
+		after
+
+	if changed {
+		log.Printf(
+			"VERSION 16 H264 NORMALIZE: before=%s after=%s removedSPS=%d removedPPS=%d",
+			before,
+			after,
+			duplicateSPS,
+			duplicatePPS,
+		)
+	}
 
 	return out
 }
@@ -2827,22 +3026,18 @@ func (s *StreamSession) writeAccessUnit(
 			accessUnit,
 		)
 
-	s.lastNALSummary =
+	sourceSummary :=
 		naluSummary(
 			accessUnit,
 		)
 
+	s.lastNALSummary =
+		sourceSummary
+
 	/*
-		V15's critical change:
-
-		Inspect the SPS/PPS and detect a codec/resolution
-		change BEFORE writing this access unit into the
-		current MPEG-TS segment.
-
-		If Nest changes from 640x360 Level 3.0 to
-		1920x1080 Level 4.0, the previous segment is
-		closed first and the new codec generation begins
-		on a fresh segment.
+		Important V16 ordering:
+		diagnostics and parameter caching inspect the original
+		source access unit first. Only the muxed IDR is normalized.
 	*/
 	s.updateH264DiagnosticsLocked(
 		accessUnit,
@@ -2866,12 +3061,12 @@ func (s *StreamSession) writeAccessUnit(
 		}
 
 		log.Printf(
-			"VERSION 15 HLS started on IDR: generation=%d SPS=%t PPS=%t PTS=%d NAL=%s codec=[%s]",
+			"VERSION 16 HLS started on IDR: generation=%d SPS=%t PPS=%t PTS=%d NAL=%s codec=[%s]",
 			s.currentGeneration,
 			len(s.sps) > 0,
 			len(s.pps) > 0,
 			pts,
-			s.lastNALSummary,
+			sourceSummary,
 			codecSignatureString(
 				s.activeCodec,
 			),
@@ -2895,11 +3090,11 @@ func (s *StreamSession) writeAccessUnit(
 		}
 
 		log.Printf(
-			"VERSION 15 new IDR segment: sequence=%d generation=%d PTS=%d NAL=%s",
+			"VERSION 16 new IDR segment: sequence=%d generation=%d PTS=%d NAL=%s",
 			s.NextSequence,
 			s.currentGeneration,
 			pts,
-			s.lastNALSummary,
+			sourceSummary,
 		)
 	}
 
@@ -2976,7 +3171,8 @@ func getSession() *StreamSession {
 
 	return currentSession
 }
-	func createStreamSession(
+
+func createStreamSession(
 	camera Camera,
 	cameraIndex int,
 ) (*StreamSession, error) {
@@ -3075,7 +3271,7 @@ func getSession() *StreamSession {
 			state webrtc.PeerConnectionState,
 		) {
 			log.Printf(
-				"VERSION 15 WebRTC state: %s",
+				"VERSION 16 WebRTC state: %s",
 				state.String(),
 			)
 		},
@@ -3090,7 +3286,7 @@ func getSession() *StreamSession {
 				track.Codec()
 
 			log.Printf(
-				"VERSION 15 incoming track: kind=%s codec=%s payload=%d",
+				"VERSION 16 incoming track: kind=%s codec=%s payload=%d",
 				track.Kind().String(),
 				codec.MimeType,
 				codec.PayloadType,
@@ -3114,7 +3310,7 @@ func getSession() *StreamSession {
 
 						if err != nil {
 							log.Println(
-								"VERSION 15 video RTP ended:",
+								"VERSION 16 video RTP ended:",
 								err,
 							)
 
@@ -3163,7 +3359,7 @@ func getSession() *StreamSession {
 
 						if err != nil {
 							log.Printf(
-								"VERSION 15 H264 depacketize error: %v",
+								"VERSION 16 H264 depacketize error: %v",
 								err,
 							)
 
@@ -3205,7 +3401,7 @@ func getSession() *StreamSession {
 								err != nil {
 
 								log.Printf(
-									"VERSION 15 MPEGTS write error: %v",
+									"VERSION 16 MPEGTS write error: %v",
 									err,
 								)
 							}
@@ -3214,7 +3410,7 @@ func getSession() *StreamSession {
 								units%30 == 0 {
 
 								log.Printf(
-									"VERSION 15 H264 AU: units=%d packets=%d size=%d PTS=%d NAL=%s",
+									"VERSION 16 H264 AU: units=%d packets=%d size=%d PTS=%d NAL=%s",
 									units,
 									packets,
 									len(accessUnit),
@@ -3244,7 +3440,7 @@ func getSession() *StreamSession {
 
 						if err != nil {
 							log.Println(
-								"VERSION 15 audio RTP ended:",
+								"VERSION 16 audio RTP ended:",
 								err,
 							)
 
@@ -3419,7 +3615,7 @@ func getSession() *StreamSession {
 	}
 
 	log.Println(
-		"VERSION 15 SDP confirmed: audio -> video -> application",
+		"VERSION 16 SDP confirmed: audio -> video -> application",
 	)
 
 	payload :=
@@ -3474,7 +3670,7 @@ func getSession() *StreamSession {
 	}
 
 	log.Printf(
-		"VERSION 15 Nest backend HTTP status: %d",
+		"VERSION 16 Nest backend HTTP status: %d",
 		resp.StatusCode,
 	)
 
@@ -3540,12 +3736,11 @@ func getSession() *StreamSession {
 	}
 
 	log.Println(
-		"VERSION 15 Nest WebRTC session started",
+		"VERSION 16 Nest WebRTC session started",
 	)
 
 	return session, nil
 }
-
 func health(
 	w http.ResponseWriter,
 	r *http.Request,
@@ -3561,6 +3756,9 @@ func health(
 	var discontinuities uint64
 	var codecChanges uint64
 	var generation uint64
+	var duplicateSPS uint64
+	var duplicatePPS uint64
+	var cleanedAUs uint64
 
 	if session != nil {
 		segments =
@@ -3588,6 +3786,21 @@ func health(
 				&session.Stats.CodecChanges,
 			)
 
+		duplicateSPS =
+			atomic.LoadUint64(
+				&session.Stats.DuplicateSPSRemoved,
+			)
+
+		duplicatePPS =
+			atomic.LoadUint64(
+				&session.Stats.DuplicatePPSRemoved,
+			)
+
+		cleanedAUs =
+			atomic.LoadUint64(
+				&session.Stats.CleanedAccessUnits,
+			)
+
 		session.mu.RLock()
 
 		generation =
@@ -3610,7 +3823,7 @@ func health(
 				"pion-h264-hls",
 
 			"version":
-				15,
+				16,
 
 			"streaming":
 				streaming,
@@ -3632,6 +3845,18 @@ func health(
 
 			"generation":
 				generation,
+
+			"duplicateSPSRemoved":
+				duplicateSPS,
+
+			"duplicatePPSRemoved":
+				duplicatePPS,
+
+			"cleanedAccessUnits":
+				cleanedAUs,
+
+			"parameterSetDeduplication":
+				true,
 
 			"codecTransitionHandling":
 				true,
@@ -3686,7 +3911,7 @@ func start(
 	}
 
 	log.Printf(
-		"VERSION 15 Shortcut body: %q",
+		"VERSION 16 Shortcut body: %q",
 		string(body),
 	)
 
@@ -3728,7 +3953,6 @@ func start(
 		switch v := value.(type) {
 
 		case float64:
-
 			cameraIndex =
 				int(v)
 
@@ -3736,7 +3960,6 @@ func start(
 				true
 
 		case string:
-
 			v =
 				strings.TrimSpace(
 					v,
@@ -3805,7 +4028,7 @@ func start(
 		cameras[cameraIndex]
 
 	log.Printf(
-		"VERSION 15 starting camera %d: %s",
+		"VERSION 16 starting camera %d: %s",
 		cameraIndex,
 		camera.Name,
 	)
@@ -3818,7 +4041,7 @@ func start(
 
 	if err != nil {
 		log.Println(
-			"VERSION 15 camera start failed:",
+			"VERSION 16 camera start failed:",
 			err,
 		)
 
@@ -3841,15 +4064,13 @@ func start(
 	select {
 
 	case <-session.ready:
-
 		log.Println(
-			"VERSION 15 HLS READY",
+			"VERSION 16 HLS READY",
 		)
 
 	case <-time.After(
 		25 * time.Second,
 	):
-
 		session.Close()
 
 		sessionMu.Lock()
@@ -3882,7 +4103,9 @@ func start(
 
 	if len(session.Segments) > 0 {
 		diagnostic =
-			session.Segments[len(session.Segments)-1].Diagnostics
+			session.Segments[
+				len(session.Segments)-1
+			].Diagnostics
 	}
 
 	h264Diagnostic =
@@ -3890,6 +4113,12 @@ func start(
 
 	generation :=
 		session.currentGeneration
+
+	lastOriginal :=
+		session.lastNALSummary
+
+	lastCleaned :=
+		session.lastCleanedNALSummary
 
 	session.mu.RUnlock()
 
@@ -3913,7 +4142,7 @@ func start(
 				"/live/index.m3u8",
 
 			"version":
-				15,
+				16,
 
 			"videoPackets":
 				atomic.LoadUint64(
@@ -3955,8 +4184,29 @@ func start(
 					&session.Stats.CodecChanges,
 				),
 
+			"duplicateSPSRemoved":
+				atomic.LoadUint64(
+					&session.Stats.DuplicateSPSRemoved,
+				),
+
+			"duplicatePPSRemoved":
+				atomic.LoadUint64(
+					&session.Stats.DuplicatePPSRemoved,
+				),
+
+			"cleanedAccessUnits":
+				atomic.LoadUint64(
+					&session.Stats.CleanedAccessUnits,
+				),
+
 			"generation":
 				generation,
+
+			"lastOriginalNALTypes":
+				lastOriginal,
+
+			"lastCleanedNALTypes":
+				lastCleaned,
 
 			"lastDiagnostic":
 				diagnostic,
@@ -3986,7 +4236,7 @@ func statusHandler(
 					false,
 
 				"version":
-					15,
+					16,
 			},
 		)
 
@@ -4006,6 +4256,9 @@ func statusHandler(
 
 	nalSummary :=
 		session.lastNALSummary
+
+	cleanedNALSummary :=
+		session.lastCleanedNALSummary
 
 	h264 :=
 		session.h264Diagnostics
@@ -4029,7 +4282,9 @@ func statusHandler(
 
 	if len(session.Segments) > 0 {
 		seg :=
-			session.Segments[len(session.Segments)-1]
+			session.Segments[
+				len(session.Segments)-1
+			]
 
 		lastSegment =
 			map[string]interface{}{
@@ -4072,7 +4327,7 @@ func statusHandler(
 				true,
 
 			"version":
-				15,
+				16,
 
 			"camera":
 				session.Index,
@@ -4130,6 +4385,21 @@ func statusHandler(
 					&session.Stats.CodecChanges,
 				),
 
+			"duplicateSPSRemoved":
+				atomic.LoadUint64(
+					&session.Stats.DuplicateSPSRemoved,
+				),
+
+			"duplicatePPSRemoved":
+				atomic.LoadUint64(
+					&session.Stats.DuplicatePPSRemoved,
+				),
+
+			"cleanedAccessUnits":
+				atomic.LoadUint64(
+					&session.Stats.CleanedAccessUnits,
+				),
+
 			"sps":
 				hasSPS,
 
@@ -4141,6 +4411,9 @@ func statusHandler(
 
 			"lastNALTypes":
 				nalSummary,
+
+			"lastCleanedNALTypes":
+				cleanedNALSummary,
 
 			"h264":
 				h264,
@@ -4182,7 +4455,7 @@ func h264DiagnosticsHandler(
 					"no active stream",
 
 				"version":
-					15,
+					16,
 			},
 		)
 
@@ -4199,6 +4472,12 @@ func h264DiagnosticsHandler(
 
 	generation :=
 		session.currentGeneration
+
+	lastOriginal :=
+		session.lastNALSummary
+
+	lastCleaned :=
+		session.lastCleanedNALSummary
 
 	changes :=
 		append(
@@ -4251,7 +4530,7 @@ func h264DiagnosticsHandler(
 		200,
 		map[string]interface{}{
 			"version":
-				15,
+				16,
 
 			"camera":
 				session.Index,
@@ -4272,6 +4551,27 @@ func h264DiagnosticsHandler(
 				atomic.LoadUint64(
 					&session.Stats.CodecChanges,
 				),
+
+			"duplicateSPSRemoved":
+				atomic.LoadUint64(
+					&session.Stats.DuplicateSPSRemoved,
+				),
+
+			"duplicatePPSRemoved":
+				atomic.LoadUint64(
+					&session.Stats.DuplicatePPSRemoved,
+				),
+
+			"cleanedAccessUnits":
+				atomic.LoadUint64(
+					&session.Stats.CleanedAccessUnits,
+				),
+
+			"lastOriginalNALTypes":
+				lastOriginal,
+
+			"lastCleanedNALTypes":
+				lastCleaned,
 
 			"history":
 				changes,
@@ -4298,7 +4598,7 @@ func diagnosticsHandler(
 					"no active stream",
 
 				"version":
-					15,
+					16,
 			},
 		)
 
@@ -4318,7 +4618,7 @@ func diagnosticsHandler(
 					"no completed segment yet",
 
 				"version":
-					15,
+					16,
 			},
 		)
 
@@ -4376,7 +4676,9 @@ func diagnosticsHandler(
 	}
 
 	last :=
-		session.Segments[len(session.Segments)-1]
+		session.Segments[
+			len(session.Segments)-1
+		]
 
 	session.mu.RUnlock()
 
@@ -4385,7 +4687,7 @@ func diagnosticsHandler(
 		200,
 		map[string]interface{}{
 			"version":
-				15,
+				16,
 
 			"camera":
 				session.Index,
@@ -4415,6 +4717,21 @@ func diagnosticsHandler(
 			"codecChanges":
 				atomic.LoadUint64(
 					&session.Stats.CodecChanges,
+				),
+
+			"duplicateSPSRemoved":
+				atomic.LoadUint64(
+					&session.Stats.DuplicateSPSRemoved,
+				),
+
+			"duplicatePPSRemoved":
+				atomic.LoadUint64(
+					&session.Stats.DuplicatePPSRemoved,
+				),
+
+			"cleanedAccessUnits":
+				atomic.LoadUint64(
+					&session.Stats.CleanedAccessUnits,
 				),
 		},
 	)
@@ -4671,7 +4988,7 @@ func stopHandler(
 				"stopped",
 
 			"version":
-				15,
+				16,
 		},
 	)
 }
@@ -4745,6 +5062,9 @@ func main() {
 					"parameterSetCache":
 						true,
 
+					"parameterSetDeduplication":
+						true,
+
 					"normalizedTimestamps":
 						true,
 
@@ -4758,14 +5078,14 @@ func main() {
 						"/debug/h264",
 
 					"version":
-						15,
+						16,
 				},
 			)
 		},
 	)
 
 	log.Println(
-		"NestView TV Pion HLS Bridge VERSION 15 running on port " +
+		"NestView TV Pion HLS Bridge VERSION 16 running on port " +
 			port,
 	)
 
