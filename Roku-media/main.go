@@ -52,72 +52,18 @@ type MediaStats struct {
 	AudioPackets uint64
 	AudioBytes   uint64
 
-	AccessUnits  uint64
-	HLSSegments  uint64
+	AccessUnits uint64
+	HLSSegments uint64
 	EmptyPackets uint64
 
 	ValidatedTS     uint64
 	ValidationError uint64
 
 	TimestampDiscontinuities uint64
-}
 
-type H264Diagnostics struct {
-	Valid bool `json:"valid"`
+	CodecChanges uint64
 
-	ProfileIDC int `json:"profileIDC"`
-	Profile    string `json:"profile"`
-
-	ConstraintFlags int `json:"constraintFlags"`
-
-	LevelIDC int `json:"levelIDC"`
-	Level    string `json:"level"`
-
-	SPSBytes int `json:"spsBytes"`
-	PPSBytes int `json:"ppsBytes"`
-
-	SPSHex string `json:"spsHex,omitempty"`
-	PPSHex string `json:"ppsHex,omitempty"`
-
-	SPSID uint64 `json:"spsID"`
-
-	ChromaFormatIDC uint64 `json:"chromaFormatIDC"`
-
-	SeparateColourPlaneFlag bool `json:"separateColourPlaneFlag"`
-
-	BitDepthLuma   int `json:"bitDepthLuma"`
-	BitDepthChroma int `json:"bitDepthChroma"`
-
-	Log2MaxFrameNum int `json:"log2MaxFrameNum"`
-
-	PicOrderCntType uint64 `json:"picOrderCntType"`
-
-	Log2MaxPicOrderCntLSB int `json:"log2MaxPicOrderCntLSB"`
-
-	MaxNumRefFrames uint64 `json:"maxNumRefFrames"`
-
-	PicWidthInMbs int `json:"picWidthInMbs"`
-
-	PicHeightInMapUnits int `json:"picHeightInMapUnits"`
-
-	FrameMbsOnly bool `json:"frameMbsOnly"`
-
-	FrameCropLeft   uint64 `json:"frameCropLeft"`
-	FrameCropRight  uint64 `json:"frameCropRight"`
-	FrameCropTop    uint64 `json:"frameCropTop"`
-	FrameCropBottom uint64 `json:"frameCropBottom"`
-
-	CodedWidth  int `json:"codedWidth"`
-	CodedHeight int `json:"codedHeight"`
-
-	DisplayWidth  int `json:"displayWidth"`
-	DisplayHeight int `json:"displayHeight"`
-
-	VUIParametersPresent bool `json:"vuiParametersPresent"`
-
-	SafariBaselineCompatible bool `json:"safariBaselineCompatible"`
-
-	Error string `json:"error,omitempty"`
+	PlaylistGenerations uint64
 }
 
 type TSDiagnostics struct {
@@ -181,6 +127,110 @@ type TSDiagnostics struct {
 	Error string `json:"error,omitempty"`
 }
 
+type H264Diagnostics struct {
+	Valid bool `json:"valid"`
+
+	Profile string `json:"profile"`
+
+	ProfileIDC int `json:"profileIDC"`
+
+	ConstraintFlags int `json:"constraintFlags"`
+
+	Level string `json:"level"`
+
+	LevelIDC int `json:"levelIDC"`
+
+	SPSID uint64 `json:"spsID"`
+
+	ChromaFormatIDC uint64 `json:"chromaFormatIDC"`
+
+	SeparateColourPlaneFlag bool `json:"separateColourPlaneFlag"`
+
+	BitDepthLuma int `json:"bitDepthLuma"`
+
+	BitDepthChroma int `json:"bitDepthChroma"`
+
+	Log2MaxFrameNum int `json:"log2MaxFrameNum"`
+
+	PicOrderCntType uint64 `json:"picOrderCntType"`
+
+	Log2MaxPicOrderCntLSB int `json:"log2MaxPicOrderCntLSB"`
+
+	MaxNumRefFrames uint64 `json:"maxNumRefFrames"`
+
+	PicWidthInMbs int `json:"picWidthInMbs"`
+
+	PicHeightInMapUnits int `json:"picHeightInMapUnits"`
+
+	FrameMbsOnly bool `json:"frameMbsOnly"`
+
+	FrameCropLeft uint64 `json:"frameCropLeft"`
+
+	FrameCropRight uint64 `json:"frameCropRight"`
+
+	FrameCropTop uint64 `json:"frameCropTop"`
+
+	FrameCropBottom uint64 `json:"frameCropBottom"`
+
+	CodedWidth int `json:"codedWidth"`
+
+	CodedHeight int `json:"codedHeight"`
+
+	DisplayWidth int `json:"displayWidth"`
+
+	DisplayHeight int `json:"displayHeight"`
+
+	VUIParametersPresent bool `json:"vuiParametersPresent"`
+
+	SPSBytes int `json:"spsBytes"`
+
+	PPSBytes int `json:"ppsBytes"`
+
+	SPSHex string `json:"spsHex,omitempty"`
+
+	PPSHex string `json:"ppsHex,omitempty"`
+
+	SafariBaselineCompatible bool `json:"baseline8bit420"`
+
+	Error string `json:"error,omitempty"`
+}
+
+type CodecSignature struct {
+	ProfileIDC int `json:"profileIDC"`
+
+	LevelIDC int `json:"levelIDC"`
+
+	Width int `json:"width"`
+
+	Height int `json:"height"`
+
+	ChromaFormatIDC uint64 `json:"chromaFormatIDC"`
+
+	BitDepthLuma int `json:"bitDepthLuma"`
+
+	BitDepthChroma int `json:"bitDepthChroma"`
+
+	SPSHex string `json:"spsHex,omitempty"`
+
+	PPSHex string `json:"ppsHex,omitempty"`
+}
+
+type CodecChange struct {
+	Number uint64 `json:"number"`
+
+	Time string `json:"time"`
+
+	PTS int64 `json:"pts"`
+
+	From CodecSignature `json:"from"`
+
+	To CodecSignature `json:"to"`
+
+	SegmentSequence int `json:"segmentSequence"`
+
+	Reason string `json:"reason"`
+}
+
 type HLSSegment struct {
 	Sequence int
 
@@ -193,6 +243,12 @@ type HLSSegment struct {
 	ValidateErr string
 
 	Diagnostics TSDiagnostics
+
+	Codec CodecSignature
+
+	Generation uint64
+
+	DiscontinuityBefore bool
 }
 
 type StreamSession struct {
@@ -224,6 +280,18 @@ type StreamSession struct {
 	h264Diagnostics H264Diagnostics
 
 	h264Logged bool
+
+	activeCodec CodecSignature
+
+	haveActiveCodec bool
+
+	currentSegmentCodec CodecSignature
+
+	currentGeneration uint64
+
+	pendingDiscontinuity bool
+
+	codecChanges []CodecChange
 
 	timestampStarted bool
 
@@ -672,111 +740,27 @@ func naluSummary(
 	)
 }
 
-// VERSION 14:
-// Minimal H.264 SPS bit reader used only for diagnostics.
-// It does not alter the camera media in any way.
+func stripAnnexBStartCode(
+	data []byte,
+) []byte {
+	if len(data) >= 4 &&
+		data[0] == 0 &&
+		data[1] == 0 &&
+		data[2] == 0 &&
+		data[3] == 1 {
 
-type bitReader struct {
-	data []byte
-	bit  int
-}
-
-func (b *bitReader) readBit() (uint64, error) {
-	if b.bit >= len(b.data)*8 {
-		return 0,
-			fmt.Errorf("unexpected end of SPS")
+		return data[4:]
 	}
 
-	byteIndex :=
-		b.bit / 8
+	if len(data) >= 3 &&
+		data[0] == 0 &&
+		data[1] == 0 &&
+		data[2] == 1 {
 
-	bitIndex :=
-		7 - (b.bit % 8)
-
-	value :=
-		uint64(
-			(b.data[byteIndex] >>
-				bitIndex) & 1,
-		)
-
-	b.bit++
-
-	return value, nil
-}
-
-func (b *bitReader) readBits(
-	count int,
-) (uint64, error) {
-	var value uint64
-
-	for i := 0; i < count; i++ {
-		bit, err := b.readBit()
-
-		if err != nil {
-			return 0, err
-		}
-
-		value =
-			(value << 1) | bit
+		return data[3:]
 	}
 
-	return value, nil
-}
-
-func (b *bitReader) readUE() (uint64, error) {
-	zeros := 0
-
-	for {
-		bit, err := b.readBit()
-
-		if err != nil {
-			return 0, err
-		}
-
-		if bit == 1 {
-			break
-		}
-
-		zeros++
-
-		if zeros > 63 {
-			return 0,
-				fmt.Errorf(
-					"invalid Exp-Golomb code",
-				)
-		}
-	}
-
-	if zeros == 0 {
-		return 0, nil
-	}
-
-	value, err :=
-		b.readBits(zeros)
-
-	if err != nil {
-		return 0, err
-	}
-
-	return ((uint64(1) << zeros) - 1) +
-		value,
-		nil
-}
-
-func (b *bitReader) readSE() (int64, error) {
-	value, err := b.readUE()
-
-	if err != nil {
-		return 0, err
-	}
-
-	if value%2 == 0 {
-		return -int64(value / 2), nil
-	}
-
-	return int64(
-		(value + 1) / 2,
-	), nil
+	return data
 }
 
 func removeEmulationPrevention(
@@ -791,7 +775,9 @@ func removeEmulationPrevention(
 
 	zeroCount := 0
 
-	for _, value := range data {
+	for _, value :=
+		range data {
+
 		if zeroCount >= 2 &&
 			value == 0x03 {
 
@@ -815,27 +801,165 @@ func removeEmulationPrevention(
 	return out
 }
 
-func stripAnnexBStartCode(
-	data []byte,
-) []byte {
-	if len(data) >= 4 &&
-		data[0] == 0 &&
-		data[1] == 0 &&
-		data[2] == 0 &&
-		data[3] == 1 {
+type bitReader struct {
+	data []byte
+	pos  int
+}
 
-		return data[4:]
+func (b *bitReader) readBit() (
+	uint64,
+	error,
+) {
+	if b.pos >=
+		len(b.data)*8 {
+
+		return 0,
+			io.ErrUnexpectedEOF
 	}
 
-	if len(data) >= 3 &&
-		data[0] == 0 &&
-		data[1] == 0 &&
-		data[2] == 1 {
+	byteIndex :=
+		b.pos / 8
 
-		return data[3:]
+	bitIndex :=
+		7 - (b.pos % 8)
+
+	value :=
+		uint64(
+			(b.data[byteIndex] >>
+				bitIndex) & 1,
+		)
+
+	b.pos++
+
+	return value, nil
+}
+
+func (b *bitReader) readBits(
+	count int,
+) (uint64, error) {
+	var value uint64
+
+	for i := 0;
+		i < count;
+		i++ {
+
+		bit, err :=
+			b.readBit()
+
+		if err != nil {
+			return 0, err
+		}
+
+		value =
+			(value << 1) |
+				bit
 	}
 
-	return data
+	return value, nil
+}
+
+func (b *bitReader) readUE() (
+	uint64,
+	error,
+) {
+	zeros := 0
+
+	for {
+		bit, err :=
+			b.readBit()
+
+		if err != nil {
+			return 0, err
+		}
+
+		if bit == 1 {
+			break
+		}
+
+		zeros++
+
+		if zeros > 63 {
+			return 0,
+				fmt.Errorf(
+					"Exp-Golomb overflow",
+				)
+		}
+	}
+
+	if zeros == 0 {
+		return 0, nil
+	}
+
+	suffix, err :=
+		b.readBits(
+			zeros,
+		)
+
+	if err != nil {
+		return 0, err
+	}
+
+	return (uint64(1)<<zeros) -
+			1 +
+			suffix,
+		nil
+}
+
+func (b *bitReader) readSE() (
+	int64,
+	error,
+) {
+	value, err :=
+		b.readUE()
+
+	if err != nil {
+		return 0, err
+	}
+
+	if value%2 == 0 {
+		return -int64(
+			value / 2,
+		), nil
+	}
+
+	return int64(
+		(value + 1) / 2,
+	), nil
+}
+
+func skipScalingList(
+	b *bitReader,
+	size int,
+) error {
+	lastScale := int64(8)
+	nextScale := int64(8)
+
+	for j := 0;
+		j < size;
+		j++ {
+
+		if nextScale != 0 {
+			deltaScale, err :=
+				b.readSE()
+
+			if err != nil {
+				return err
+			}
+
+			nextScale =
+				(lastScale +
+					deltaScale +
+					256) %
+					256
+		}
+
+		if nextScale != 0 {
+			lastScale =
+				nextScale
+		}
+	}
+
+	return nil
 }
 
 func profileName(
@@ -866,7 +990,7 @@ func profileName(
 
 	default:
 		return fmt.Sprintf(
-			"Profile %d",
+			"Profile-%d",
 			profileIDC,
 		)
 	}
@@ -879,58 +1003,103 @@ func levelName(
 		return "unknown"
 	}
 
-	if levelIDC%10 == 0 {
-		return fmt.Sprintf(
-			"%d",
-			levelIDC/10,
-		)
-	}
+	major :=
+		levelIDC / 10
+
+	minor :=
+		levelIDC % 10
 
 	return fmt.Sprintf(
 		"%d.%d",
-		levelIDC/10,
-		levelIDC%10,
+		major,
+		minor,
 	)
 }
 
-func skipScalingList(
-	b *bitReader,
-	size int,
-) error {
-	lastScale := int64(8)
-	nextScale := int64(8)
+func codecSignatureFromDiagnostics(
+	d H264Diagnostics,
+) CodecSignature {
+	return CodecSignature{
+		ProfileIDC:
+			d.ProfileIDC,
 
-	for j := 0; j < size; j++ {
-		if nextScale != 0 {
-			deltaScale, err :=
-				b.readSE()
+		LevelIDC:
+			d.LevelIDC,
 
-			if err != nil {
-				return err
-			}
+		Width:
+			d.DisplayWidth,
 
-			nextScale =
-				(lastScale +
-					deltaScale +
-					256) % 256
-		}
+		Height:
+			d.DisplayHeight,
 
-		if nextScale != 0 {
-			lastScale =
-				nextScale
-		}
+		ChromaFormatIDC:
+			d.ChromaFormatIDC,
+
+		BitDepthLuma:
+			d.BitDepthLuma,
+
+		BitDepthChroma:
+			d.BitDepthChroma,
+
+		SPSHex:
+			d.SPSHex,
+
+		PPSHex:
+			d.PPSHex,
 	}
-
-	return nil
 }
+
+func sameCodecSignature(
+	a CodecSignature,
+	b CodecSignature,
+) bool {
+	return a.ProfileIDC ==
+			b.ProfileIDC &&
+		a.LevelIDC ==
+			b.LevelIDC &&
+		a.Width ==
+			b.Width &&
+		a.Height ==
+			b.Height &&
+		a.ChromaFormatIDC ==
+			b.ChromaFormatIDC &&
+		a.BitDepthLuma ==
+			b.BitDepthLuma &&
+		a.BitDepthChroma ==
+			b.BitDepthChroma &&
+		a.SPSHex ==
+			b.SPSHex &&
+		a.PPSHex ==
+			b.PPSHex
+}
+
+func codecSignatureString(
+	c CodecSignature,
+) string {
+	return fmt.Sprintf(
+		"profile=%d level=%d size=%dx%d chroma=%d bitDepth=%d/%d",
+		c.ProfileIDC,
+		c.LevelIDC,
+		c.Width,
+		c.Height,
+		c.ChromaFormatIDC,
+		c.BitDepthLuma,
+		c.BitDepthChroma,
+	)
+}
+
 func parseH264SPS(
 	spsAnnexB []byte,
 	ppsAnnexB []byte,
 ) H264Diagnostics {
-	d := H264Diagnostics{
-		SPSBytes: len(spsAnnexB),
-		PPSBytes: len(ppsAnnexB),
-	}
+	d :=
+		H264Diagnostics{
+			SPSBytes:
+				len(spsAnnexB),
+
+			PPSBytes:
+				len(ppsAnnexB),
+		}
 
 	raw :=
 		stripAnnexBStartCode(
@@ -938,7 +1107,9 @@ func parseH264SPS(
 		)
 
 	if len(raw) < 4 {
-		d.Error = "SPS too short"
+		d.Error =
+			"SPS too short"
+
 		return d
 	}
 
@@ -973,7 +1144,9 @@ func parseH264SPS(
 		)
 
 	if len(rbsp) < 3 {
-		d.Error = "SPS RBSP too short"
+		d.Error =
+			"SPS RBSP too short"
+
 		return d
 	}
 
@@ -998,7 +1171,8 @@ func parseH264SPS(
 
 	b :=
 		&bitReader{
-			data: rbsp[3:],
+			data:
+				rbsp[3:],
 		}
 
 	spsID, err :=
@@ -1012,7 +1186,8 @@ func parseH264SPS(
 		return d
 	}
 
-	d.SPSID = spsID
+	d.SPSID =
+		spsID
 
 	chromaFormatIDC :=
 		uint64(1)
@@ -1089,7 +1264,8 @@ func parseH264SPS(
 			return d
 		}
 
-		seqScalingMatrixPresent, readErr :=
+		seqScalingMatrixPresent,
+			readErr :=
 			b.readBit()
 
 		if readErr != nil {
@@ -1162,7 +1338,8 @@ func parseH264SPS(
 				8,
 		)
 
-	log2MaxFrameNumMinus4, err :=
+	log2MaxFrameNumMinus4,
+		err :=
 		b.readUE()
 
 	if err != nil {
@@ -1179,7 +1356,8 @@ func parseH264SPS(
 				4,
 		)
 
-	picOrderCntType, err :=
+	picOrderCntType,
+		err :=
 		b.readUE()
 
 	if err != nil {
@@ -1277,7 +1455,8 @@ func parseH264SPS(
 		}
 	}
 
-	maxNumRefFrames, err :=
+	maxNumRefFrames,
+		err :=
 		b.readUE()
 
 	if err != nil {
@@ -1302,7 +1481,8 @@ func parseH264SPS(
 		return d
 	}
 
-	picWidthInMbsMinus1, err :=
+	picWidthInMbsMinus1,
+		err :=
 		b.readUE()
 
 	if err != nil {
@@ -1313,7 +1493,8 @@ func parseH264SPS(
 		return d
 	}
 
-	picHeightInMapUnitsMinus1, err :=
+	picHeightInMapUnitsMinus1,
+		err :=
 		b.readUE()
 
 	if err != nil {
@@ -1336,7 +1517,8 @@ func parseH264SPS(
 				1,
 		)
 
-	frameMbsOnlyFlag, err :=
+	frameMbsOnlyFlag,
+		err :=
 		b.readBit()
 
 	if err != nil {
@@ -1374,7 +1556,8 @@ func parseH264SPS(
 		return d
 	}
 
-	frameCroppingFlag, err :=
+	frameCroppingFlag,
+		err :=
 		b.readBit()
 
 	if err != nil {
@@ -1431,7 +1614,8 @@ func parseH264SPS(
 		}
 	}
 
-	vuiPresent, err :=
+	vuiPresent,
+		err :=
 		b.readBit()
 
 	if err == nil {
@@ -1454,14 +1638,19 @@ func parseH264SPS(
 			frameHeightMultiplier
 
 	cropUnitX := 1
+
 	cropUnitY :=
-		2 - int(frameMbsOnlyFlag)
+		2 -
+			int(
+				frameMbsOnlyFlag,
+			)
 
 	if !d.SeparateColourPlaneFlag {
 		switch d.ChromaFormatIDC {
 
 		case 0:
 			cropUnitX = 1
+
 			cropUnitY =
 				2 -
 					int(
@@ -1470,6 +1659,7 @@ func parseH264SPS(
 
 		case 1:
 			cropUnitX = 2
+
 			cropUnitY =
 				2 *
 					(2 -
@@ -1479,6 +1669,7 @@ func parseH264SPS(
 
 		case 2:
 			cropUnitX = 2
+
 			cropUnitY =
 				2 -
 					int(
@@ -1487,6 +1678,7 @@ func parseH264SPS(
 
 		case 3:
 			cropUnitX = 1
+
 			cropUnitY =
 				2 -
 					int(
@@ -1530,10 +1722,34 @@ func parseH264SPS(
 			"parsed SPS produced invalid dimensions"
 	}
 
-	return d
-}
+	return y
+	func (s *StreamSession) updateH264DiagnosticsLocked(
+	accessUnit []byte,
+	pts int64,
+) {
+	hasIDR, hasSPS, hasPPS, newSPS, newPPS :=
+		inspectAccessUnit(accessUnit)
 
-func (s *StreamSession) updateH264DiagnosticsLocked() {
+	if hasSPS &&
+		len(newSPS) > 0 {
+
+		s.sps =
+			append(
+				[]byte(nil),
+				newSPS...,
+			)
+	}
+
+	if hasPPS &&
+		len(newPPS) > 0 {
+
+		s.pps =
+			append(
+				[]byte(nil),
+				newPPS...,
+			)
+	}
+
 	if len(s.sps) == 0 {
 		return
 	}
@@ -1547,99 +1763,198 @@ func (s *StreamSession) updateH264DiagnosticsLocked() {
 	s.h264Diagnostics =
 		diagnostics
 
-	if diagnostics.Valid {
-		log.Printf(
-			"VERSION 14 H264 SPS: profile=%s profileIDC=%d constraints=0x%02x level=%s levelIDC=%d chroma=%d bitDepth=%d/%d coded=%dx%d display=%dx%d refs=%d frameMbsOnly=%t VUI=%t",
-			diagnostics.Profile,
-			diagnostics.ProfileIDC,
-			diagnostics.ConstraintFlags,
-			diagnostics.Level,
-			diagnostics.LevelIDC,
-			diagnostics.ChromaFormatIDC,
-			diagnostics.BitDepthLuma,
-			diagnostics.BitDepthChroma,
-			diagnostics.CodedWidth,
-			diagnostics.CodedHeight,
-			diagnostics.DisplayWidth,
-			diagnostics.DisplayHeight,
-			diagnostics.MaxNumRefFrames,
-			diagnostics.FrameMbsOnly,
-			diagnostics.VUIParametersPresent,
+	if !diagnostics.Valid {
+		if hasSPS {
+			log.Printf(
+				"VERSION 15 H264 SPS PARSE ERROR: %s",
+				diagnostics.Error,
+			)
+		}
+
+		return
+	}
+
+	signature :=
+		codecSignatureFromDiagnostics(
+			diagnostics,
 		)
 
+	if !s.haveActiveCodec {
+		s.activeCodec =
+			signature
+
+		s.haveActiveCodec =
+			true
+
+		s.currentGeneration = 0
+
 		log.Printf(
-			"VERSION 14 H264 COMPATIBILITY: baseline8bit420=%t SPSbytes=%d PPSbytes=%d SPS=%s PPS=%s",
-			diagnostics.SafariBaselineCompatible,
+			"VERSION 15 H264 INITIAL CODEC: %s profileName=%s levelName=%s SPS=%d PPS=%d IDR=%t PTS=%d",
+			codecSignatureString(
+				signature,
+			),
+			diagnostics.Profile,
+			diagnostics.Level,
 			diagnostics.SPSBytes,
 			diagnostics.PPSBytes,
-			diagnostics.SPSHex,
-			diagnostics.PPSHex,
+			hasIDR,
+			pts,
 		)
-	} else {
-		log.Printf(
-			"VERSION 14 H264 SPS PARSE ERROR: %s SPS=%s",
-			diagnostics.Error,
-			diagnostics.SPSHex,
-		)
+
+		s.h264Logged = true
+
+		return
 	}
+
+	if sameCodecSignature(
+		s.activeCodec,
+		signature,
+	) {
+		if !s.h264Logged {
+			log.Printf(
+				"VERSION 15 H264 CODEC: %s",
+				codecSignatureString(
+					signature,
+				),
+			)
+
+			s.h264Logged = true
+		}
+
+		return
+	}
+
+	oldCodec :=
+		s.activeCodec
+
+	changeNumber :=
+		atomic.AddUint64(
+			&s.Stats.CodecChanges,
+			1,
+		)
+
+	log.Printf(
+		"VERSION 15 CODEC CHANGE DETECTED #%d: FROM [%s] TO [%s] IDR=%t PTS=%d",
+		changeNumber,
+		codecSignatureString(
+			oldCodec,
+		),
+		codecSignatureString(
+			signature,
+		),
+		hasIDR,
+		pts,
+	)
+
+	if s.segmentActive &&
+		s.currentBuffer != nil &&
+		s.currentBuffer.Len() > 0 {
+
+		log.Printf(
+			"VERSION 15 closing old codec segment before SPS transition: sequence=%d generation=%d",
+			s.NextSequence,
+			s.currentGeneration,
+		)
+
+		s.finishSegmentLocked()
+	}
+
+	s.currentGeneration++
+
+	s.pendingDiscontinuity = true
+
+	s.activeCodec =
+		signature
+
+	change :=
+		CodecChange{
+			Number:
+				changeNumber,
+
+			Time:
+				time.Now().UTC().Format(
+					time.RFC3339Nano,
+				),
+
+			PTS:
+				pts,
+
+			From:
+				oldCodec,
+
+			To:
+				signature,
+
+			SegmentSequence:
+				s.NextSequence,
+
+			Reason:
+				"SPS/PPS codec signature changed",
+		}
+
+	s.codecChanges =
+		append(
+			s.codecChanges,
+			change,
+		)
+
+	if len(s.codecChanges) > 16 {
+		s.codecChanges =
+			append(
+				[]CodecChange(nil),
+				s.codecChanges[len(s.codecChanges)-16:]...,
+			)
+	}
+
+	log.Printf(
+		"VERSION 15 HLS DISCONTINUITY ARMED: generation=%d nextSequence=%d",
+		s.currentGeneration,
+		s.NextSequence,
+	)
 }
 
 func (s *StreamSession) cacheParametersLocked(
 	accessUnit []byte,
 ) {
-	_, hasSPS, hasPPS, sps, pps :=
+	_, hasSPS, hasPPS, newSPS, newPPS :=
 		inspectAccessUnit(accessUnit)
 
-	changed := false
-
 	if hasSPS &&
-		len(sps) > 0 &&
+		len(newSPS) > 0 &&
 		!bytes.Equal(
 			s.sps,
-			sps,
+			newSPS,
 		) {
 
 		s.sps =
 			append(
 				[]byte(nil),
-				sps...,
+				newSPS...,
 			)
 
-		changed = true
-
 		log.Printf(
-			"VERSION 14 cached SPS: %d bytes",
+			"VERSION 15 cached SPS: %d bytes",
 			len(s.sps),
 		)
 	}
 
 	if hasPPS &&
-		len(pps) > 0 &&
+		len(newPPS) > 0 &&
 		!bytes.Equal(
 			s.pps,
-			pps,
+			newPPS,
 		) {
 
 		s.pps =
 			append(
 				[]byte(nil),
-				pps...,
+				newPPS...,
 			)
 
-		changed = true
-
 		log.Printf(
-			"VERSION 14 cached PPS: %d bytes",
+			"VERSION 15 cached PPS: %d bytes",
 			len(s.pps),
 		)
-	}
-
-	if changed &&
-		len(s.sps) > 0 {
-
-		s.updateH264DiagnosticsLocked()
-
-		s.h264Logged = true
 	}
 }
 
@@ -1659,7 +1974,7 @@ func (s *StreamSession) normalizeTimestamp(
 			ptsOffset
 
 		log.Printf(
-			"VERSION 14 timestamp clock started: RTP=%d PTS=%d",
+			"VERSION 15 timestamp clock started: RTP=%d PTS=%d",
 			rtpTimestamp,
 			s.normalizedPTS,
 		)
@@ -1680,7 +1995,7 @@ func (s *StreamSession) normalizeTimestamp(
 		)
 
 		log.Printf(
-			"VERSION 14 timestamp discontinuity: previous=%d current=%d rawDelta=%d",
+			"VERSION 15 timestamp discontinuity: previous=%d current=%d rawDelta=%d",
 			s.lastRTPTimestamp,
 			rtpTimestamp,
 			delta,
@@ -1730,7 +2045,6 @@ func parsePCR(
 
 	if adaptationLength < 7 ||
 		5+adaptationLength > len(packet) {
-
 		return -1
 	}
 
@@ -1757,20 +2071,40 @@ func parsePCR(
 func diagnoseTS(
 	data []byte,
 ) TSDiagnostics {
-	d := TSDiagnostics{
-		Bytes:    len(data),
-		FirstPTS: -1,
-		LastPTS:  -1,
-		MinPTS:   -1,
-		MaxPTS:   -1,
-		FirstPCR: -1,
-		LastPCR:  -1,
-		PMTPID:   -1,
-		VideoPID: -1,
-	}
+	d :=
+		TSDiagnostics{
+			Bytes:
+				len(data),
+
+			FirstPTS:
+				-1,
+
+			LastPTS:
+				-1,
+
+			MinPTS:
+				-1,
+
+			MaxPTS:
+				-1,
+
+			FirstPCR:
+				-1,
+
+			LastPCR:
+				-1,
+
+			PMTPID:
+				-1,
+
+			VideoPID:
+				-1,
+		}
 
 	if len(data) == 0 {
-		d.Error = "segment is empty"
+		d.Error =
+			"segment is empty"
+
 		return d
 	}
 
@@ -1781,7 +2115,9 @@ func diagnoseTS(
 			)
 	} else {
 		d.FirstPacketHex =
-			hex.EncodeToString(data)
+			hex.EncodeToString(
+				data,
+			)
 	}
 
 	if len(data)%188 != 0 {
@@ -1876,16 +2212,20 @@ func diagnoseTS(
 
 					if flags&0x10 != 0 {
 						pcr :=
-							parsePCR(packet)
+							parsePCR(
+								packet,
+							)
 
 						if pcr >= 0 {
 							d.PCRPackets++
 
 							if d.FirstPCR < 0 {
-								d.FirstPCR = pcr
+								d.FirstPCR =
+									pcr
 							}
 
-							d.LastPCR = pcr
+							d.LastPCR =
+								pcr
 						}
 					}
 				}
@@ -1923,7 +2263,8 @@ func diagnoseTS(
 				int(packet[4])
 
 			payloadStart +=
-				1 + adaptationLength
+				1 +
+					adaptationLength
 		}
 
 		if !hasPayload ||
@@ -1953,13 +2294,16 @@ func diagnoseTS(
 					sectionLength :=
 						int(
 							binary.BigEndian.Uint16(
-								payload[pos+1:pos+3],
+								payload[pos+1:
+									pos+3],
 							) & 0x0FFF,
 						)
 
 					end :=
-						pos + 3 +
-							sectionLength - 4
+						pos +
+							3 +
+							sectionLength -
+							4
 
 					programPos :=
 						pos + 8
@@ -1969,13 +2313,17 @@ func diagnoseTS(
 
 						programNumber :=
 							binary.BigEndian.Uint16(
-								payload[programPos:programPos+2],
+								payload[
+									programPos:
+									programPos+2],
 							)
 
 						programPID :=
 							int(
 								binary.BigEndian.Uint16(
-									payload[programPos+2:programPos+4],
+									payload[
+										programPos+2:
+										programPos+4],
 								) & 0x1FFF,
 							)
 
@@ -2012,24 +2360,29 @@ func diagnoseTS(
 					sectionLength :=
 						int(
 							binary.BigEndian.Uint16(
-								payload[pos+1:pos+3],
+								payload[pos+1:
+									pos+3],
 							) & 0x0FFF,
 						)
 
 					programInfoLength :=
 						int(
 							binary.BigEndian.Uint16(
-								payload[pos+10:pos+12],
+								payload[pos+10:
+									pos+12],
 							) & 0x0FFF,
 						)
 
 					esPos :=
-						pos + 12 +
+						pos +
+							12 +
 							programInfoLength
 
 					end :=
-						pos + 3 +
-							sectionLength - 4
+						pos +
+							3 +
+							sectionLength -
+							4
 
 					for esPos+5 <= end &&
 						esPos+5 <= len(payload) {
@@ -2042,14 +2395,18 @@ func diagnoseTS(
 						elementaryPID :=
 							int(
 								binary.BigEndian.Uint16(
-									payload[esPos+1:esPos+3],
+									payload[
+										esPos+1:
+										esPos+3],
 								) & 0x1FFF,
 							)
 
 						esInfoLength :=
 							int(
 								binary.BigEndian.Uint16(
-									payload[esPos+3:esPos+5],
+									payload[
+										esPos+3:
+										esPos+5],
 								) & 0x0FFF,
 							)
 
@@ -2062,7 +2419,8 @@ func diagnoseTS(
 						}
 
 						esPos +=
-							5 + esInfoLength
+							5 +
+								esInfoLength
 					}
 				}
 			}
@@ -2189,6 +2547,21 @@ func (s *StreamSession) newSegmentLocked() error {
 	s.segmentActive =
 		true
 
+	if s.haveActiveCodec {
+		s.currentSegmentCodec =
+			s.activeCodec
+	}
+
+	log.Printf(
+		"VERSION 15 SEGMENT OPEN: sequence=%d generation=%d codec=[%s] discontinuity=%t",
+		s.NextSequence,
+		s.currentGeneration,
+		codecSignatureString(
+			s.currentSegmentCodec,
+		),
+		s.pendingDiscontinuity,
+	)
+
 	return nil
 }
 
@@ -2200,7 +2573,9 @@ func validateSegment(
 	TSDiagnostics,
 ) {
 	diagnostics :=
-		diagnoseTS(data)
+		diagnoseTS(
+			data,
+		)
 
 	if diagnostics.Valid {
 		return true,
@@ -2241,7 +2616,9 @@ func (s *StreamSession) finishSegmentLocked() {
 	valid,
 		validateErr,
 		diagnostics :=
-		validateSegment(data)
+		validateSegment(
+			data,
+		)
 
 	if valid {
 		atomic.AddUint64(
@@ -2250,7 +2627,7 @@ func (s *StreamSession) finishSegmentLocked() {
 		)
 
 		log.Printf(
-			"VERSION 14 TS MEDIA VALID: packets=%d bytes=%d PAT=%d PMT=%d videoPID=%d streamType=0x%02x PES=%d PTS=%d PCR=%d continuityErrors=%d",
+			"VERSION 15 TS MEDIA VALID: packets=%d bytes=%d PAT=%d PMT=%d videoPID=%d streamType=0x%02x PES=%d PTS=%d DTS=%d PCR=%d continuityErrors=%d",
 			diagnostics.Packets,
 			diagnostics.Bytes,
 			diagnostics.PATPackets,
@@ -2259,6 +2636,7 @@ func (s *StreamSession) finishSegmentLocked() {
 			diagnostics.StreamType,
 			diagnostics.PESStartCodes,
 			diagnostics.PTSCount,
+			diagnostics.DTSCount,
 			diagnostics.PCRPackets,
 			diagnostics.ContinuityErrors,
 		)
@@ -2269,7 +2647,7 @@ func (s *StreamSession) finishSegmentLocked() {
 		)
 
 		log.Printf(
-			"VERSION 14 TS MEDIA INVALID: error=%s packets=%d PAT=%d PMT=%d videoPID=%d streamType=0x%02x PES=%d PTS=%d backwardPTS=%d PCR=%d continuityErrors=%d transportErrors=%d",
+			"VERSION 15 TS MEDIA INVALID: error=%s packets=%d PAT=%d PMT=%d videoPID=%d streamType=0x%02x PES=%d PTS=%d backwardPTS=%d PCR=%d continuityErrors=%d transportErrors=%d",
 			validateErr,
 			diagnostics.Packets,
 			diagnostics.PATPackets,
@@ -2284,6 +2662,9 @@ func (s *StreamSession) finishSegmentLocked() {
 			diagnostics.TransportErrors,
 		)
 	}
+
+	discontinuity :=
+		s.pendingDiscontinuity
 
 	segment :=
 		HLSSegment{
@@ -2304,7 +2685,19 @@ func (s *StreamSession) finishSegmentLocked() {
 
 			Diagnostics:
 				diagnostics,
+
+			Codec:
+				s.currentSegmentCodec,
+
+			Generation:
+				s.currentGeneration,
+
+			DiscontinuityBefore:
+				discontinuity,
 		}
+
+	s.pendingDiscontinuity =
+		false
 
 	s.NextSequence++
 
@@ -2330,22 +2723,34 @@ func (s *StreamSession) finishSegmentLocked() {
 	)
 
 	log.Printf(
-		"VERSION 14 HLS SEGMENT READY: sequence=%d duration=%.3f size=%d mediaValid=%t",
+		"VERSION 15 HLS SEGMENT READY: sequence=%d generation=%d duration=%.3f size=%d mediaValid=%t discontinuityBefore=%t codec=[%s]",
 		segment.Sequence,
+		segment.Generation,
 		segment.Duration,
 		len(segment.Data),
 		segment.Validated,
+		segment.DiscontinuityBefore,
+		codecSignatureString(
+			segment.Codec,
+		),
 	)
 
 	s.readyOnce.Do(
 		func() {
-			close(s.ready)
+			close(
+				s.ready,
+			)
 		},
 	)
 
-	s.currentBuffer = nil
-	s.currentWriter = nil
-	s.segmentActive = false
+	s.currentBuffer =
+		nil
+
+	s.currentWriter =
+		nil
+
+	s.segmentActive =
+		false
 }
 
 func (s *StreamSession) keyframeAccessUnitLocked(
@@ -2412,10 +2817,6 @@ func (s *StreamSession) writeAccessUnit(
 	default:
 	}
 
-	s.cacheParametersLocked(
-		accessUnit,
-	)
-
 	hasIDR,
 		_,
 		_,
@@ -2430,19 +2831,26 @@ func (s *StreamSession) writeAccessUnit(
 			accessUnit,
 		)
 
-	if hasIDR &&
-		s.h264Diagnostics.Valid {
+	/*
+		V15's critical change:
 
-		log.Printf(
-			"VERSION 14 IDR: PTS=%d NAL=%s profile=%s level=%s display=%dx%d",
-			pts,
-			s.lastNALSummary,
-			s.h264Diagnostics.Profile,
-			s.h264Diagnostics.Level,
-			s.h264Diagnostics.DisplayWidth,
-			s.h264Diagnostics.DisplayHeight,
-		)
-	}
+		Inspect the SPS/PPS and detect a codec/resolution
+		change BEFORE writing this access unit into the
+		current MPEG-TS segment.
+
+		If Nest changes from 640x360 Level 3.0 to
+		1920x1080 Level 4.0, the previous segment is
+		closed first and the new codec generation begins
+		on a fresh segment.
+	*/
+	s.updateH264DiagnosticsLocked(
+		accessUnit,
+		pts,
+	)
+
+	s.cacheParametersLocked(
+		accessUnit,
+	)
 
 	if !s.segmentActive {
 		if !hasIDR {
@@ -2457,11 +2865,15 @@ func (s *StreamSession) writeAccessUnit(
 		}
 
 		log.Printf(
-			"VERSION 14 HLS started on IDR: SPS=%t PPS=%t PTS=%d NAL=%s",
+			"VERSION 15 HLS started on IDR: generation=%d SPS=%t PPS=%t PTS=%d NAL=%s codec=[%s]",
+			s.currentGeneration,
 			len(s.sps) > 0,
 			len(s.pps) > 0,
 			pts,
 			s.lastNALSummary,
+			codecSignatureString(
+				s.activeCodec,
+			),
 		)
 	}
 
@@ -2482,8 +2894,9 @@ func (s *StreamSession) writeAccessUnit(
 		}
 
 		log.Printf(
-			"VERSION 14 new IDR segment: sequence=%d PTS=%d NAL=%s",
+			"VERSION 15 new IDR segment: sequence=%d generation=%d PTS=%d NAL=%s",
 			s.NextSequence,
+			s.currentGeneration,
 			pts,
 			s.lastNALSummary,
 		)
@@ -2505,7 +2918,9 @@ func (s *StreamSession) writeAccessUnit(
 func (s *StreamSession) Close() {
 	s.closeOnce.Do(
 		func() {
-			close(s.done)
+			close(
+				s.done,
+			)
 
 			s.mu.Lock()
 
@@ -2517,14 +2932,20 @@ func (s *StreamSession) Close() {
 				s.finishSegmentLocked()
 			}
 
-			s.currentWriter = nil
-			s.currentBuffer = nil
-			s.segmentActive = false
+			s.currentWriter =
+				nil
+
+			s.currentBuffer =
+				nil
+
+			s.segmentActive =
+				false
 
 			s.mu.Unlock()
 
 			if s.PC != nil {
-				_ = s.PC.Close()
+				_ =
+					s.PC.Close()
 			}
 		},
 	)
@@ -2554,7 +2975,7 @@ func getSession() *StreamSession {
 
 	return currentSession
 }
-func createStreamSession(
+	func createStreamSession(
 	camera Camera,
 	cameraIndex int,
 ) (*StreamSession, error) {
@@ -2653,7 +3074,7 @@ func createStreamSession(
 			state webrtc.PeerConnectionState,
 		) {
 			log.Printf(
-				"VERSION 14 WebRTC state: %s",
+				"VERSION 15 WebRTC state: %s",
 				state.String(),
 			)
 		},
@@ -2668,11 +3089,10 @@ func createStreamSession(
 				track.Codec()
 
 			log.Printf(
-				"VERSION 14 incoming track: kind=%s codec=%s payload=%d fmtp=%s",
+				"VERSION 15 incoming track: kind=%s codec=%s payload=%d",
 				track.Kind().String(),
 				codec.MimeType,
 				codec.PayloadType,
-				codec.SDPFmtpLine,
 			)
 
 			if track.Kind() ==
@@ -2693,7 +3113,7 @@ func createStreamSession(
 
 						if err != nil {
 							log.Println(
-								"VERSION 14 video RTP ended:",
+								"VERSION 15 video RTP ended:",
 								err,
 							)
 
@@ -2742,7 +3162,7 @@ func createStreamSession(
 
 						if err != nil {
 							log.Printf(
-								"VERSION 14 H264 depacketize error: %v",
+								"VERSION 15 H264 depacketize error: %v",
 								err,
 							)
 
@@ -2784,7 +3204,7 @@ func createStreamSession(
 								err != nil {
 
 								log.Printf(
-									"VERSION 14 MPEGTS write error: %v",
+									"VERSION 15 MPEGTS write error: %v",
 									err,
 								)
 							}
@@ -2793,7 +3213,7 @@ func createStreamSession(
 								units%30 == 0 {
 
 								log.Printf(
-									"VERSION 14 H264 AU: units=%d packets=%d size=%d PTS=%d NAL=%s",
+									"VERSION 15 H264 AU: units=%d packets=%d size=%d PTS=%d NAL=%s",
 									units,
 									packets,
 									len(accessUnit),
@@ -2823,7 +3243,7 @@ func createStreamSession(
 
 						if err != nil {
 							log.Println(
-								"VERSION 14 audio RTP ended:",
+								"VERSION 15 audio RTP ended:",
 								err,
 							)
 
@@ -2998,7 +3418,7 @@ func createStreamSession(
 	}
 
 	log.Println(
-		"VERSION 14 SDP confirmed: audio -> video -> application",
+		"VERSION 15 SDP confirmed: audio -> video -> application",
 	)
 
 	payload :=
@@ -3011,7 +3431,9 @@ func createStreamSession(
 		}
 
 	data, err :=
-		json.Marshal(payload)
+		json.Marshal(
+			payload,
+		)
 
 	if err != nil {
 		session.Close()
@@ -3028,7 +3450,9 @@ func createStreamSession(
 		client.Post(
 			nestBackend+"/api/webrtc",
 			"application/json",
-			bytes.NewReader(data),
+			bytes.NewReader(
+				data,
+			),
 		)
 
 	if err != nil {
@@ -3049,7 +3473,7 @@ func createStreamSession(
 	}
 
 	log.Printf(
-		"VERSION 14 Nest backend HTTP status: %d",
+		"VERSION 15 Nest backend HTTP status: %d",
 		resp.StatusCode,
 	)
 
@@ -3085,7 +3509,9 @@ func createStreamSession(
 	}
 
 	answer :=
-		findAnswerSDP(result)
+		findAnswerSDP(
+			result,
+		)
 
 	if answer == "" {
 		session.Close()
@@ -3113,7 +3539,7 @@ func createStreamSession(
 	}
 
 	log.Println(
-		"VERSION 14 Nest WebRTC session started",
+		"VERSION 15 Nest WebRTC session started",
 	)
 
 	return session, nil
@@ -3132,8 +3558,8 @@ func health(
 	var validated uint64
 	var validationErrors uint64
 	var discontinuities uint64
-
-	var h264 H264Diagnostics
+	var codecChanges uint64
+	var generation uint64
 
 	if session != nil {
 		segments =
@@ -3156,10 +3582,15 @@ func health(
 				&session.Stats.TimestampDiscontinuities,
 			)
 
+		codecChanges =
+			atomic.LoadUint64(
+				&session.Stats.CodecChanges,
+			)
+
 		session.mu.RLock()
 
-		h264 =
-			session.h264Diagnostics
+		generation =
+			session.currentGeneration
 
 		session.mu.RUnlock()
 
@@ -3178,7 +3609,7 @@ func health(
 				"pion-h264-hls",
 
 			"version":
-				14,
+				15,
 
 			"streaming":
 				streaming,
@@ -3195,11 +3626,17 @@ func health(
 			"timestampDiscontinuities":
 				discontinuities,
 
-			"h264Diagnostics":
-				h264,
+			"codecChanges":
+				codecChanges,
 
-			"diagnostics":
-				"PAT-PMT-PES-PTS-PCR-continuity-H264-SPS",
+			"generation":
+				generation,
+
+			"codecTransitionHandling":
+				true,
+
+			"hlsDiscontinuity":
+				true,
 
 			"timestampOffset":
 				ptsOffset,
@@ -3248,7 +3685,7 @@ func start(
 	}
 
 	log.Printf(
-		"VERSION 14 Shortcut body: %q",
+		"VERSION 15 Shortcut body: %q",
 		string(body),
 	)
 
@@ -3280,8 +3717,9 @@ func start(
 	for key, value :=
 		range rawRequest {
 
-		if strings.TrimSpace(key) !=
-			"camera" {
+		if strings.TrimSpace(
+			key,
+		) != "camera" {
 
 			continue
 		}
@@ -3299,10 +3737,14 @@ func start(
 		case string:
 
 			v =
-				strings.TrimSpace(v)
+				strings.TrimSpace(
+					v,
+				)
 
 			if parsed, parseErr :=
-				strconv.Atoi(v);
+				strconv.Atoi(
+					v,
+				);
 				parseErr == nil {
 
 				cameraIndex =
@@ -3362,7 +3804,7 @@ func start(
 		cameras[cameraIndex]
 
 	log.Printf(
-		"VERSION 14 starting camera %d: %s",
+		"VERSION 15 starting camera %d: %s",
 		cameraIndex,
 		camera.Name,
 	)
@@ -3375,7 +3817,7 @@ func start(
 
 	if err != nil {
 		log.Println(
-			"VERSION 14 camera start failed:",
+			"VERSION 15 camera start failed:",
 			err,
 		)
 
@@ -3391,14 +3833,16 @@ func start(
 		return
 	}
 
-	replaceSession(session)
+	replaceSession(
+		session,
+	)
 
 	select {
 
 	case <-session.ready:
 
 		log.Println(
-			"VERSION 14 HLS READY",
+			"VERSION 15 HLS READY",
 		)
 
 	case <-time.After(
@@ -3433,14 +3877,18 @@ func start(
 	session.mu.RLock()
 
 	var diagnostic interface{}
+	var h264Diagnostic interface{}
 
 	if len(session.Segments) > 0 {
 		diagnostic =
 			session.Segments[len(session.Segments)-1].Diagnostics
 	}
 
-	h264Diagnostic :=
+	h264Diagnostic =
 		session.h264Diagnostics
+
+	generation :=
+		session.currentGeneration
 
 	session.mu.RUnlock()
 
@@ -3463,14 +3911,8 @@ func start(
 			"hls":
 				"/live/index.m3u8",
 
-			"diagnostics":
-				"/debug/ts",
-
-			"h264Diagnostics":
-				"/debug/h264",
-
 			"version":
-				14,
+				15,
 
 			"videoPackets":
 				atomic.LoadUint64(
@@ -3507,11 +3949,22 @@ func start(
 					&session.Stats.TimestampDiscontinuities,
 				),
 
+			"codecChanges":
+				atomic.LoadUint64(
+					&session.Stats.CodecChanges,
+				),
+
+			"generation":
+				generation,
+
 			"lastDiagnostic":
 				diagnostic,
 
-			"h264":
+			"h264Diagnostic":
 				h264Diagnostic,
+
+			"codecTransitions":
+				"/debug/h264",
 		},
 	)
 }
@@ -3532,7 +3985,7 @@ func statusHandler(
 					false,
 
 				"version":
-					14,
+					15,
 			},
 		)
 
@@ -3555,6 +4008,21 @@ func statusHandler(
 
 	h264 :=
 		session.h264Diagnostics
+
+	activeCodec :=
+		session.activeCodec
+
+	generation :=
+		session.currentGeneration
+
+	pendingDiscontinuity :=
+		session.pendingDiscontinuity
+
+	changes :=
+		append(
+			[]CodecChange(nil),
+			session.codecChanges...,
+		)
 
 	var lastSegment interface{}
 
@@ -3581,6 +4049,15 @@ func statusHandler(
 
 				"diagnostics":
 					seg.Diagnostics,
+
+				"codec":
+					seg.Codec,
+
+				"generation":
+					seg.Generation,
+
+				"discontinuityBefore":
+					seg.DiscontinuityBefore,
 			}
 	}
 
@@ -3594,7 +4071,7 @@ func statusHandler(
 				true,
 
 			"version":
-				14,
+				15,
 
 			"camera":
 				session.Index,
@@ -3647,6 +4124,11 @@ func statusHandler(
 					&session.Stats.TimestampDiscontinuities,
 				),
 
+			"codecChanges":
+				atomic.LoadUint64(
+					&session.Stats.CodecChanges,
+				),
+
 			"sps":
 				hasSPS,
 
@@ -3662,13 +4144,22 @@ func statusHandler(
 			"h264":
 				h264,
 
+			"activeCodec":
+				activeCodec,
+
+			"generation":
+				generation,
+
+			"pendingDiscontinuity":
+				pendingDiscontinuity,
+
+			"codecHistory":
+				changes,
+
 			"lastSegment":
 				lastSegment,
 
-			"diagnostics":
-				"/debug/ts",
-
-			"h264Diagnostics":
+			"codecTransitions":
 				"/debug/h264",
 		},
 	)
@@ -3690,7 +4181,7 @@ func h264DiagnosticsHandler(
 					"no active stream",
 
 				"version":
-					14,
+					15,
 			},
 		)
 
@@ -3699,17 +4190,58 @@ func h264DiagnosticsHandler(
 
 	session.mu.RLock()
 
-	diagnostics :=
+	h264 :=
 		session.h264Diagnostics
 
-	nalSummary :=
-		session.lastNALSummary
+	activeCodec :=
+		session.activeCodec
 
-	hasSPS :=
-		len(session.sps) > 0
+	generation :=
+		session.currentGeneration
 
-	hasPPS :=
-		len(session.pps) > 0
+	changes :=
+		append(
+			[]CodecChange(nil),
+			session.codecChanges...,
+		)
+
+	segments :=
+		make(
+			[]map[string]interface{},
+			0,
+			len(session.Segments),
+		)
+
+	for _, segment :=
+		range session.Segments {
+
+		segments =
+			append(
+				segments,
+				map[string]interface{}{
+					"sequence":
+						segment.Sequence,
+
+					"duration":
+						segment.Duration,
+
+					"bytes":
+						len(segment.Data),
+
+					"codec":
+						segment.Codec,
+
+					"generation":
+						segment.Generation,
+
+					"discontinuityBefore":
+						segment.DiscontinuityBefore,
+
+					"validated":
+						segment.Validated,
+				},
+			)
+	}
 
 	session.mu.RUnlock()
 
@@ -3718,7 +4250,7 @@ func h264DiagnosticsHandler(
 		200,
 		map[string]interface{}{
 			"version":
-				14,
+				15,
 
 			"camera":
 				session.Index,
@@ -3726,17 +4258,25 @@ func h264DiagnosticsHandler(
 			"name":
 				session.Camera.Name,
 
-			"hasSPS":
-				hasSPS,
-
-			"hasPPS":
-				hasPPS,
-
-			"lastNALTypes":
-				nalSummary,
+			"activeCodec":
+				activeCodec,
 
 			"h264":
-				diagnostics,
+				h264,
+
+			"generation":
+				generation,
+
+			"codecChanges":
+				atomic.LoadUint64(
+					&session.Stats.CodecChanges,
+				),
+
+			"history":
+				changes,
+
+			"segments":
+				segments,
 		},
 	)
 }
@@ -3757,7 +4297,7 @@ func diagnosticsHandler(
 					"no active stream",
 
 				"version":
-					14,
+					15,
 			},
 		)
 
@@ -3777,7 +4317,7 @@ func diagnosticsHandler(
 					"no completed segment yet",
 
 				"version":
-					14,
+					15,
 			},
 		)
 
@@ -3816,6 +4356,15 @@ func diagnosticsHandler(
 					"diagnostics":
 						segment.Diagnostics,
 
+					"codec":
+						segment.Codec,
+
+					"generation":
+						segment.Generation,
+
+					"discontinuityBefore":
+						segment.DiscontinuityBefore,
+
 					"url":
 						fmt.Sprintf(
 							"/live/segment%d.ts",
@@ -3828,9 +4377,6 @@ func diagnosticsHandler(
 	last :=
 		session.Segments[len(session.Segments)-1]
 
-	h264 :=
-		session.h264Diagnostics
-
 	session.mu.RUnlock()
 
 	writeJSON(
@@ -3838,7 +4384,7 @@ func diagnosticsHandler(
 		200,
 		map[string]interface{}{
 			"version":
-				14,
+				15,
 
 			"camera":
 				session.Index,
@@ -3855,12 +4401,6 @@ func diagnosticsHandler(
 			"playlist":
 				"/live/index.m3u8",
 
-			"h264":
-				h264,
-
-			"h264Diagnostics":
-				"/debug/h264",
-
 			"validatedTS":
 				atomic.LoadUint64(
 					&session.Stats.ValidatedTS,
@@ -3871,9 +4411,9 @@ func diagnosticsHandler(
 					&session.Stats.ValidationError,
 				),
 
-			"timestampDiscontinuities":
+			"codecChanges":
 				atomic.LoadUint64(
-					&session.Stats.TimestampDiscontinuities,
+					&session.Stats.CodecChanges,
 				),
 		},
 	)
@@ -3965,6 +4505,12 @@ func playlistHandler(
 	for _, segment :=
 		range session.Segments {
 
+		if segment.DiscontinuityBefore {
+			playlist.WriteString(
+				"#EXT-X-DISCONTINUITY\n",
+			)
+		}
+
 		playlist.WriteString(
 			fmt.Sprintf(
 				"#EXTINF:%.3f,\n",
@@ -3979,6 +4525,11 @@ func playlistHandler(
 			),
 		)
 	}
+
+	atomic.AddUint64(
+		&session.Stats.PlaylistGenerations,
+		1,
+	)
 
 	w.Header().Set(
 		"Content-Type",
@@ -4011,7 +4562,11 @@ func segmentHandler(
 		getSession()
 
 	if session == nil {
-		http.NotFound(w, r)
+		http.NotFound(
+			w,
+			r,
+		)
+
 		return
 	}
 
@@ -4028,10 +4583,16 @@ func segmentHandler(
 		)
 
 	sequence, err :=
-		strconv.Atoi(name)
+		strconv.Atoi(
+			name,
+		)
 
 	if err != nil {
-		http.NotFound(w, r)
+		http.NotFound(
+			w,
+			r,
+		)
+
 		return
 	}
 
@@ -4062,7 +4623,9 @@ func segmentHandler(
 			w.Header().Set(
 				"Content-Length",
 				strconv.Itoa(
-					len(segment.Data),
+					len(
+						segment.Data,
+					),
 				),
 			)
 
@@ -4075,7 +4638,10 @@ func segmentHandler(
 		}
 	}
 
-	http.NotFound(w, r)
+	http.NotFound(
+		w,
+		r,
+	)
 }
 
 func stopHandler(
@@ -4104,7 +4670,7 @@ func stopHandler(
 				"stopped",
 
 			"version":
-				14,
+				15,
 		},
 	)
 }
@@ -4181,27 +4747,24 @@ func main() {
 					"normalizedTimestamps":
 						true,
 
-					"timestampOffset":
-						ptsOffset,
+					"codecTransitionHandling":
+						true,
 
-					"mediaDiagnostics":
-						"PAT-PMT-PES-PTS-PCR-continuity-H264-SPS",
+					"hlsDiscontinuity":
+						true,
 
-					"h264Diagnostics":
+					"codecDiagnostics":
 						"/debug/h264",
 
-					"diagnostics":
-						"/debug/ts",
-
 					"version":
-						14,
+						15,
 				},
 			)
 		},
 	)
 
 	log.Println(
-		"NestView TV Pion HLS Bridge VERSION 14 running on port " +
+		"NestView TV Pion HLS Bridge VERSION 15 running on port " +
 			port,
 	)
 
