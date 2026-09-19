@@ -4102,10 +4102,10 @@ func start(
 	var h264Diagnostic interface{}
 
 	if len(session.Segments) > 0 {
-		diagnostic =
-			session.Segments[
-				len(session.Segments)-1
-			].Diagnostics
+	diagnostic = session.Segments[len(session.Segments)-1].Diagnostics
+			
+			
+		
 	}
 
 	h264Diagnostic =
@@ -4281,10 +4281,10 @@ func statusHandler(
 	var lastSegment interface{}
 
 	if len(session.Segments) > 0 {
-		seg :=
-			session.Segments[
-				len(session.Segments)-1
-			]
+		seg := session.Segments[len(session.Segments)-1]
+			
+				
+			
 
 		lastSegment =
 			map[string]interface{}{
@@ -4675,10 +4675,10 @@ func diagnosticsHandler(
 			)
 	}
 
-	last :=
-		session.Segments[
-			len(session.Segments)-1
-		]
+	last := session.Segments[len(session.Segments)-1]
+		
+			
+		
 
 	session.mu.RUnlock()
 
