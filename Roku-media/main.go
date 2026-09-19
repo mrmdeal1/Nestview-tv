@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -21,15 +23,21 @@ import (
 )
 
 var (
-	nestBackend = env("NEST_BACKEND", "https://nestview-tv.onrender.com")
-	port        = env("PORT", "10000")
+	nestBackend = env(
+		"NEST_BACKEND",
+		"https://nestview-tv.onrender.com",
+	)
+
+	port = env("PORT", "10000")
 )
 
 const (
-	videoPID        uint16 = 256
-	segmentDuration        = 2 * time.Second
-	maxSegments            = 6
-	ptsOffset        int64  = 126000
+	videoPID uint16 = 256
+
+	segmentDuration = 2 * time.Second
+	maxSegments     = 6
+
+	ptsOffset int64 = 126000
 )
 
 type Camera struct {
@@ -38,98 +46,216 @@ type Camera struct {
 }
 
 type MediaStats struct {
-	VideoPackets    uint64
-	VideoBytes      uint64
-	AudioPackets    uint64
-	AudioBytes      uint64
-	AccessUnits     uint64
-	HLSSegments     uint64
-	EmptyPackets    uint64
+	VideoPackets uint64
+	VideoBytes   uint64
+
+	AudioPackets uint64
+	AudioBytes   uint64
+
+	AccessUnits uint64
+	HLSSegments uint64
+	EmptyPackets uint64
+
 	ValidatedTS     uint64
 	ValidationError uint64
+
+	TimestampDiscontinuities uint64
+}
+
+type TSDiagnostics struct {
+	Valid bool `json:"valid"`
+
+	Bytes   int `json:"bytes"`
+	Packets int `json:"packets"`
+
+	SyncErrors int `json:"syncErrors"`
+
+	PATPackets int `json:"patPackets"`
+
+	PMTPackets int `json:"pmtPackets"`
+
+	VideoPackets int `json:"videoPackets"`
+
+	NullPackets int `json:"nullPackets"`
+
+	TransportErrors int `json:"transportErrors"`
+
+	PayloadPackets int `json:"payloadPackets"`
+
+	AdaptationPackets int `json:"adaptationPackets"`
+
+	PCRPackets int `json:"pcrPackets"`
+
+	DiscontinuityFlags int `json:"discontinuityFlags"`
+
+	ContinuityErrors int `json:"continuityErrors"`
+
+	PUSIPackets int `json:"pusiPackets"`
+
+	PESStartCodes int `json:"pesStartCodes"`
+
+	PTSCount int `json:"ptsCount"`
+
+	DTSCount int `json:"dtsCount"`
+
+	FirstPTS int64 `json:"firstPTS"`
+
+	LastPTS int64 `json:"lastPTS"`
+
+	MinPTS int64 `json:"minPTS"`
+
+	MaxPTS int64 `json:"maxPTS"`
+
+	BackwardPTS int `json:"backwardPTS"`
+
+	FirstPCR int64 `json:"firstPCR"`
+
+	LastPCR int64 `json:"lastPCR"`
+
+	PMTPID int `json:"pmtPID"`
+
+	VideoPID int `json:"videoPID"`
+
+	StreamType int `json:"streamType"`
+
+	FirstPacketHex string `json:"firstPacketHex,omitempty"`
+
+	Error string `json:"error,omitempty"`
 }
 
 type HLSSegment struct {
-	Sequence    int
-	Duration    float64
-	Data        []byte
-	Validated   bool
+	Sequence int
+
+	Duration float64
+
+	Data []byte
+
+	Validated bool
+
 	ValidateErr string
+
+	Diagnostics TSDiagnostics
 }
 
 type StreamSession struct {
 	mu sync.RWMutex
 
-	PC     *webrtc.PeerConnection
-	Stats  *MediaStats
-	Camera Camera
-	Index  int
+	PC *webrtc.PeerConnection
 
-	Segments     []HLSSegment
+	Stats *MediaStats
+
+	Camera Camera
+
+	Index int
+
+	Segments []HLSSegment
+
 	NextSequence int
 
 	currentBuffer *bytes.Buffer
+
 	currentWriter *mpegts.Writer
-	segmentStart  time.Time
+
+	segmentStart time.Time
+
 	segmentActive bool
 
 	sps []byte
 	pps []byte
 
 	timestampStarted bool
+
 	lastRTPTimestamp uint32
-	normalizedPTS    int64
-	lastNALSummary   string
+
+	normalizedPTS int64
+
+	lastNALSummary string
 
 	ready chan struct{}
-	done  chan struct{}
+
+	done chan struct{}
 
 	readyOnce sync.Once
+
 	closeOnce sync.Once
 }
 
 var (
-	sessionMu      sync.RWMutex
+	sessionMu sync.RWMutex
+
 	currentSession *StreamSession
 )
 
-func env(key, fallback string) string {
+func env(
+	key string,
+	fallback string,
+) string {
 	if value := os.Getenv(key); value != "" {
 		return value
 	}
+
 	return fallback
 }
 
-func writeJSON(w http.ResponseWriter, status int, value interface{}) {
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Cache-Control", "no-store")
+func writeJSON(
+	w http.ResponseWriter,
+	status int,
+	value interface{},
+) {
+	w.Header().Set(
+		"Content-Type",
+		"application/json",
+	)
+
+	w.Header().Set(
+		"Cache-Control",
+		"no-store",
+	)
+
 	w.WriteHeader(status)
+
 	_ = json.NewEncoder(w).Encode(value)
 }
 
-func firstString(m map[string]interface{}, keys ...string) string {
+func firstString(
+	m map[string]interface{},
+	keys ...string,
+) string {
 	for _, key := range keys {
-		if value, ok := m[key].(string); ok && value != "" {
+		if value, ok := m[key].(string); ok &&
+			value != "" {
+
 			return value
 		}
 	}
+
 	return ""
 }
 
 func getCameras() ([]Camera, error) {
-	client := &http.Client{Timeout: 15 * time.Second}
-	resp, err := client.Get(nestBackend + "/api/cameras")
+	client := &http.Client{
+		Timeout: 15 * time.Second,
+	}
+
+	resp, err := client.Get(
+		nestBackend + "/api/cameras",
+	)
+
 	if err != nil {
 		return nil, err
 	}
+
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
+
 	if err != nil {
 		return nil, err
 	}
 
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+	if resp.StatusCode < 200 ||
+		resp.StatusCode >= 300 {
+
 		return nil, fmt.Errorf(
 			"camera backend returned %d: %s",
 			resp.StatusCode,
@@ -138,23 +264,33 @@ func getCameras() ([]Camera, error) {
 	}
 
 	var raw interface{}
-	if err := json.Unmarshal(body, &raw); err != nil {
+
+	if err := json.Unmarshal(
+		body,
+		&raw,
+	); err != nil {
+
 		return nil, err
 	}
 
 	var list []interface{}
 
 	switch value := raw.(type) {
+
 	case []interface{}:
 		list = value
 
 	case map[string]interface{}:
+
 		for _, key := range []string{
 			"cameras",
 			"devices",
 			"results",
 		} {
-			if candidate, ok := value[key].([]interface{}); ok {
+			if candidate, ok :=
+				value[key].([]interface{});
+				ok {
+
 				list = candidate
 				break
 			}
@@ -164,7 +300,9 @@ func getCameras() ([]Camera, error) {
 	var cameras []Camera
 
 	for _, item := range list {
-		m, ok := item.(map[string]interface{})
+		m, ok :=
+			item.(map[string]interface{})
+
 		if !ok {
 			continue
 		}
@@ -190,7 +328,10 @@ func getCameras() ([]Camera, error) {
 			label = "Camera"
 		}
 
-		if strings.Contains(device, "/devices/") {
+		if strings.Contains(
+			device,
+			"/devices/",
+		) {
 			cameras = append(
 				cameras,
 				Camera{
@@ -202,47 +343,73 @@ func getCameras() ([]Camera, error) {
 	}
 
 	if len(cameras) == 0 {
-		return nil, fmt.Errorf("no cameras found")
+		return nil,
+			fmt.Errorf("no cameras found")
 	}
 
 	return cameras, nil
 }
 
-func findAnswerSDP(value interface{}) string {
+func findAnswerSDP(
+	value interface{},
+) string {
 	switch v := value.(type) {
 
 	case map[string]interface{}:
+
 		for key, item := range v {
-			lowerKey := strings.ToLower(key)
+			lowerKey :=
+				strings.ToLower(key)
 
 			if lowerKey == "answersdp" ||
 				lowerKey == "answer_sdp" ||
 				lowerKey == "answer" ||
 				lowerKey == "sdp" {
 
-				if text, ok := item.(string); ok &&
-					strings.Contains(text, "v=0") {
+				if text, ok :=
+					item.(string);
+					ok &&
+						strings.Contains(
+							text,
+							"v=0",
+						) {
+
 					return text
 				}
 			}
 		}
 
 		for _, item := range v {
-			if answer := findAnswerSDP(item); answer != "" {
+			if answer :=
+				findAnswerSDP(item);
+				answer != "" {
+
 				return answer
 			}
 		}
 
 	case []interface{}:
+
 		for _, item := range v {
-			if answer := findAnswerSDP(item); answer != "" {
+			if answer :=
+				findAnswerSDP(item);
+				answer != "" {
+
 				return answer
 			}
 		}
 
 	case string:
-		if strings.Contains(v, "v=0") &&
-			strings.Contains(v, "m=video") {
+
+		if strings.Contains(
+			v,
+			"v=0",
+		) &&
+			strings.Contains(
+				v,
+				"m=video",
+			) {
+
 			return v
 		}
 	}
@@ -250,52 +417,77 @@ func findAnswerSDP(value interface{}) string {
 	return ""
 }
 
-func waitForICE(pc *webrtc.PeerConnection) {
-	done := webrtc.GatheringCompletePromise(pc)
+func waitForICE(
+	pc *webrtc.PeerConnection,
+) {
+	done :=
+		webrtc.GatheringCompletePromise(
+			pc,
+		)
 
 	select {
+
 	case <-done:
-	case <-time.After(10 * time.Second):
+
+	case <-time.After(
+		10 * time.Second,
+	):
 	}
 }
 
-func splitAnnexB(data []byte) [][]byte {
+func splitAnnexB(
+	data []byte,
+) [][]byte {
 	var nalus [][]byte
 
-	findStart := func(from int) (int, int) {
-		for i := from; i < len(data); i++ {
+	findStart :=
+		func(
+			from int,
+		) (int, int) {
 
-			if i+4 <= len(data) &&
-				data[i] == 0 &&
-				data[i+1] == 0 &&
-				data[i+2] == 0 &&
-				data[i+3] == 1 {
-				return i, 4
+			for i := from;
+				i < len(data);
+				i++ {
+
+				if i+4 <= len(data) &&
+					data[i] == 0 &&
+					data[i+1] == 0 &&
+					data[i+2] == 0 &&
+					data[i+3] == 1 {
+
+					return i, 4
+				}
+
+				if i+3 <= len(data) &&
+					data[i] == 0 &&
+					data[i+1] == 0 &&
+					data[i+2] == 1 {
+
+					return i, 3
+				}
 			}
 
-			if i+3 <= len(data) &&
-				data[i] == 0 &&
-				data[i+1] == 0 &&
-				data[i+2] == 1 {
-				return i, 3
-			}
+			return -1, 0
 		}
-
-		return -1, 0
-	}
 
 	pos := 0
 
 	for {
-		start, prefix := findStart(pos)
+		start, prefix :=
+			findStart(pos)
+
 		if start < 0 {
 			break
 		}
 
-		naluStart := start + prefix
-		next, _ := findStart(naluStart)
+		naluStart :=
+			start + prefix
 
-		naluEnd := len(data)
+		next, _ :=
+			findStart(naluStart)
+
+		naluEnd :=
+			len(data)
 
 		if next >= 0 {
 			naluEnd = next
@@ -306,7 +498,10 @@ func splitAnnexB(data []byte) [][]byte {
 				nalus,
 				append(
 					[]byte(nil),
-					data[naluStart:naluEnd]...,
+					data[
+						naluStart:
+						naluEnd
+					]...,
 				),
 			)
 		}
@@ -321,14 +516,25 @@ func splitAnnexB(data []byte) [][]byte {
 	return nalus
 }
 
-func annexB(nalu []byte) []byte {
+func annexB(
+	nalu []byte,
+) []byte {
 	if len(nalu) == 0 {
 		return nil
 	}
 
-	out := make([]byte, 4+len(nalu))
+	out :=
+		make(
+			[]byte,
+			4+len(nalu),
+		)
+
 	out[3] = 1
-	copy(out[4:], nalu)
+
+	copy(
+		out[4:],
+		nalu,
+	)
 
 	return out
 }
@@ -342,7 +548,9 @@ func inspectAccessUnit(
 	sps []byte,
 	pps []byte,
 ) {
-	for _, nalu := range splitAnnexB(data) {
+	for _, nalu :=
+		range splitAnnexB(data) {
+
 		if len(nalu) == 0 {
 			continue
 		}
@@ -365,20 +573,32 @@ func inspectAccessUnit(
 	return
 }
 
-func naluSummary(data []byte) string {
-	nalus := splitAnnexB(data)
+func naluSummary(
+	data []byte,
+) string {
+	nalus :=
+		splitAnnexB(data)
 
 	if len(nalus) == 0 {
 		return "no-annexb-nalus"
 	}
 
-	types := make([]string, 0, len(nalus))
+	types :=
+		make(
+			[]string,
+			0,
+			len(nalus),
+		)
 
 	for _, nalu := range nalus {
 		if len(nalu) > 0 {
 			types = append(
 				types,
-				strconv.Itoa(int(nalu[0]&0x1F)),
+				strconv.Itoa(
+					int(
+						nalu[0] & 0x1F,
+					),
+				),
 			)
 		}
 	}
@@ -387,7 +607,10 @@ func naluSummary(data []byte) string {
 		return "empty-nalus"
 	}
 
-	return strings.Join(types, ",")
+	return strings.Join(
+		types,
+		",",
+	)
 }
 
 func (s *StreamSession) cacheParametersLocked(
@@ -398,24 +621,38 @@ func (s *StreamSession) cacheParametersLocked(
 
 	if hasSPS &&
 		len(sps) > 0 &&
-		!bytes.Equal(s.sps, sps) {
+		!bytes.Equal(
+			s.sps,
+			sps,
+		) {
 
-		s.sps = append([]byte(nil), sps...)
+		s.sps =
+			append(
+				[]byte(nil),
+				sps...,
+			)
 
 		log.Printf(
-			"VERSION 12 cached SPS: %d bytes",
+			"VERSION 13 cached SPS: %d bytes",
 			len(s.sps),
 		)
 	}
 
 	if hasPPS &&
 		len(pps) > 0 &&
-		!bytes.Equal(s.pps, pps) {
+		!bytes.Equal(
+			s.pps,
+			pps,
+		) {
 
-		s.pps = append([]byte(nil), pps...)
+		s.pps =
+			append(
+				[]byte(nil),
+				pps...,
+			)
 
 		log.Printf(
-			"VERSION 12 cached PPS: %d bytes",
+			"VERSION 13 cached PPS: %d bytes",
 			len(s.pps),
 		)
 	}
@@ -429,11 +666,15 @@ func (s *StreamSession) normalizeTimestamp(
 
 	if !s.timestampStarted {
 		s.timestampStarted = true
-		s.lastRTPTimestamp = rtpTimestamp
-		s.normalizedPTS = ptsOffset
+
+		s.lastRTPTimestamp =
+			rtpTimestamp
+
+		s.normalizedPTS =
+			ptsOffset
 
 		log.Printf(
-			"VERSION 12 timestamp clock started: RTP=%d PTS=%d",
+			"VERSION 13 timestamp clock started: RTP=%d PTS=%d",
 			rtpTimestamp,
 			s.normalizedPTS,
 		)
@@ -441,26 +682,507 @@ func (s *StreamSession) normalizeTimestamp(
 		return s.normalizedPTS
 	}
 
-	delta := uint32(
-		rtpTimestamp - s.lastRTPTimestamp,
-	)
+	delta :=
+		uint32(
+			rtpTimestamp -
+				s.lastRTPTimestamp,
+		)
 
 	if delta > 90000*10 {
+		atomic.AddUint64(
+			&s.Stats.TimestampDiscontinuities,
+			1,
+		)
+
 		log.Printf(
-			"VERSION 12 timestamp discontinuity ignored: previous=%d current=%d delta=%d",
+			"VERSION 13 timestamp discontinuity: previous=%d current=%d rawDelta=%d",
 			s.lastRTPTimestamp,
 			rtpTimestamp,
 			delta,
 		)
 
-		s.lastRTPTimestamp = rtpTimestamp
+		s.lastRTPTimestamp =
+			rtpTimestamp
+
 		return s.normalizedPTS
 	}
 
-	s.normalizedPTS += int64(delta)
-	s.lastRTPTimestamp = rtpTimestamp
+	s.normalizedPTS +=
+		int64(delta)
+
+	s.lastRTPTimestamp =
+		rtpTimestamp
 
 	return s.normalizedPTS
+}
+
+func parsePTS(
+	data []byte,
+) int64 {
+	if len(data) < 5 {
+		return -1
+	}
+
+	pts :=
+		(int64(data[0]&0x0E) << 29) |
+			(int64(data[1]) << 22) |
+			(int64(data[2]&0xFE) << 14) |
+			(int64(data[3]) << 7) |
+			(int64(data[4]&0xFE) >> 1)
+
+	return pts
+}
+
+func parsePCR(
+	packet []byte,
+) int64 {
+	if len(packet) < 12 {
+		return -1
+	}
+
+	adaptationLength :=
+		int(packet[4])
+
+	if adaptationLength < 7 ||
+		5+adaptationLength > len(packet) {
+		return -1
+	}
+
+	flags := packet[5]
+
+	if flags&0x10 == 0 {
+		return -1
+	}
+
+	p := packet[6:12]
+
+	base :=
+		(int64(p[0]) << 25) |
+			(int64(p[1]) << 17) |
+			(int64(p[2]) << 9) |
+			(int64(p[3]) << 1) |
+			(int64(p[4]) >> 7)
+
+	return base
+}
+
+func diagnoseTS(
+	data []byte,
+) TSDiagnostics {
+	d := TSDiagnostics{
+		Bytes:    len(data),
+		FirstPTS: -1,
+		LastPTS:  -1,
+		MinPTS:   -1,
+		MaxPTS:   -1,
+		FirstPCR: -1,
+		LastPCR:  -1,
+		PMTPID:   -1,
+		VideoPID: -1,
+	}
+
+	if len(data) == 0 {
+		d.Error = "segment is empty"
+		return d
+	}
+
+	if len(data) >= 32 {
+		d.FirstPacketHex =
+			hex.EncodeToString(
+				data[:32],
+			)
+	} else {
+		d.FirstPacketHex =
+			hex.EncodeToString(data)
+	}
+
+	if len(data)%188 != 0 {
+		d.Error =
+			fmt.Sprintf(
+				"TS size %d is not divisible by 188",
+				len(data),
+			)
+
+		return d
+	}
+
+	d.Packets =
+		len(data) / 188
+
+	continuity :=
+		make(
+			map[uint16]uint8,
+		)
+
+	continuitySeen :=
+		make(
+			map[uint16]bool,
+		)
+
+	var previousPTS int64 = -1
+
+	for offset := 0;
+		offset+188 <= len(data);
+		offset += 188 {
+
+		packet :=
+			data[offset : offset+188]
+
+		if packet[0] != 0x47 {
+			d.SyncErrors++
+			continue
+		}
+
+		transportError :=
+			packet[1]&0x80 != 0
+
+		if transportError {
+			d.TransportErrors++
+		}
+
+		pusi :=
+			packet[1]&0x40 != 0
+
+		if pusi {
+			d.PUSIPackets++
+		}
+
+		pid :=
+			uint16(packet[1]&0x1F)<<8 |
+				uint16(packet[2])
+
+		adaptationControl :=
+			(packet[3] >> 4) & 0x03
+
+		counter :=
+			packet[3] & 0x0F
+
+		hasAdaptation :=
+			adaptationControl == 2 ||
+				adaptationControl == 3
+
+		hasPayload :=
+			adaptationControl == 1 ||
+				adaptationControl == 3
+
+		if pid == 0x1FFF {
+			d.NullPackets++
+		}
+
+		if hasAdaptation {
+			d.AdaptationPackets++
+
+			if len(packet) > 5 {
+				adaptationLength :=
+					int(packet[4])
+
+				if adaptationLength > 0 &&
+					5+adaptationLength <= 188 {
+
+					flags :=
+						packet[5]
+
+					if flags&0x80 != 0 {
+						d.DiscontinuityFlags++
+					}
+
+					if flags&0x10 != 0 {
+						pcr :=
+							parsePCR(packet)
+
+						if pcr >= 0 {
+							d.PCRPackets++
+
+							if d.FirstPCR < 0 {
+								d.FirstPCR = pcr
+							}
+
+							d.LastPCR = pcr
+						}
+					}
+				}
+			}
+		}
+
+		if hasPayload {
+			d.PayloadPackets++
+
+			if continuitySeen[pid] {
+				expected :=
+					(continuity[pid] + 1) &
+						0x0F
+
+				if counter != expected {
+					d.ContinuityErrors++
+				}
+			}
+
+			continuity[pid] =
+				counter
+
+			continuitySeen[pid] =
+				true
+		}
+
+		payloadStart := 4
+
+		if hasAdaptation {
+			if payloadStart >= 188 {
+				continue
+			}
+
+			adaptationLength :=
+				int(packet[4])
+
+			payloadStart +=
+				1 + adaptationLength
+		}
+
+		if !hasPayload ||
+			payloadStart >= 188 {
+
+			continue
+		}
+
+		payload :=
+			packet[payloadStart:]
+
+		if pid == 0 {
+			d.PATPackets++
+
+			if pusi &&
+				len(payload) > 0 {
+
+				pointer :=
+					int(payload[0])
+
+				pos :=
+					1 + pointer
+
+				if pos+8 <= len(payload) &&
+					payload[pos] == 0x00 {
+
+					sectionLength :=
+						int(
+							binary.BigEndian.Uint16(
+								payload[pos+1:
+									pos+3],
+							) & 0x0FFF,
+						)
+
+					end :=
+						pos + 3 +
+							sectionLength - 4
+
+					programPos :=
+						pos + 8
+
+					for programPos+4 <= end &&
+						programPos+4 <= len(payload) {
+
+						programNumber :=
+							binary.BigEndian.Uint16(
+								payload[
+									programPos:
+									programPos+2
+								],
+							)
+
+						programPID :=
+							int(
+								binary.BigEndian.Uint16(
+									payload[
+										programPos+2:
+										programPos+4
+									],
+								) & 0x1FFF,
+							)
+
+						if programNumber != 0 {
+							d.PMTPID =
+								programPID
+							break
+						}
+
+						programPos += 4
+					}
+				}
+			}
+		}
+
+		if d.PMTPID >= 0 &&
+			int(pid) == d.PMTPID {
+
+			d.PMTPackets++
+
+			if pusi &&
+				len(payload) > 0 {
+
+				pointer :=
+					int(payload[0])
+
+				pos :=
+					1 + pointer
+
+				if pos+12 <= len(payload) &&
+					payload[pos] == 0x02 {
+
+					sectionLength :=
+						int(
+							binary.BigEndian.Uint16(
+								payload[pos+1:
+									pos+3],
+							) & 0x0FFF,
+						)
+
+					programInfoLength :=
+						int(
+							binary.BigEndian.Uint16(
+								payload[pos+10:
+									pos+12],
+							) & 0x0FFF,
+						)
+
+					esPos :=
+						pos + 12 +
+							programInfoLength
+
+					end :=
+						pos + 3 +
+							sectionLength - 4
+
+					for esPos+5 <= end &&
+						esPos+5 <= len(payload) {
+
+						streamType :=
+							int(payload[esPos])
+
+						elementaryPID :=
+							int(
+								binary.BigEndian.Uint16(
+									payload[
+										esPos+1:
+										esPos+3
+									],
+								) & 0x1FFF,
+							)
+
+						esInfoLength :=
+							int(
+								binary.BigEndian.Uint16(
+									payload[
+										esPos+3:
+										esPos+5
+									],
+								) & 0x0FFF,
+							)
+
+						if streamType == 0x1B {
+							d.StreamType =
+								streamType
+
+							d.VideoPID =
+								elementaryPID
+						}
+
+						esPos +=
+							5 + esInfoLength
+					}
+				}
+			}
+		}
+
+		if d.VideoPID >= 0 &&
+			int(pid) == d.VideoPID {
+
+			d.VideoPackets++
+
+			if pusi &&
+				len(payload) >= 9 &&
+				payload[0] == 0x00 &&
+				payload[1] == 0x00 &&
+				payload[2] == 0x01 {
+
+				d.PESStartCodes++
+
+				flags :=
+					payload[7]
+
+				headerLength :=
+					int(payload[8])
+
+				if flags&0x80 != 0 &&
+					headerLength >= 5 &&
+					len(payload) >= 14 {
+
+					pts :=
+						parsePTS(
+							payload[9:14],
+						)
+
+					if pts >= 0 {
+						d.PTSCount++
+
+						if d.FirstPTS < 0 {
+							d.FirstPTS =
+								pts
+						}
+
+						d.LastPTS =
+							pts
+
+						if d.MinPTS < 0 ||
+							pts < d.MinPTS {
+
+							d.MinPTS =
+								pts
+						}
+
+						if d.MaxPTS < 0 ||
+							pts > d.MaxPTS {
+
+							d.MaxPTS =
+								pts
+						}
+
+						if previousPTS >= 0 &&
+							pts < previousPTS {
+
+							d.BackwardPTS++
+						}
+
+						previousPTS =
+							pts
+					}
+				}
+
+				if flags&0x40 != 0 {
+					d.DTSCount++
+				}
+			}
+		}
+	}
+
+	d.Valid =
+		d.SyncErrors == 0 &&
+			d.TransportErrors == 0 &&
+			d.PATPackets > 0 &&
+			d.PMTPackets > 0 &&
+			d.VideoPID >= 0 &&
+			d.StreamType == 0x1B &&
+			d.VideoPackets > 0 &&
+			d.PESStartCodes > 0 &&
+			d.PTSCount > 0 &&
+			d.BackwardPTS == 0
+
+	if !d.Valid &&
+		d.Error == "" {
+
+		d.Error =
+			"media-level TS diagnostics failed"
+	}
+
+	return d
 }
 func (s *StreamSession) newSegmentLocked() error {
 	buf := &bytes.Buffer{}
@@ -481,28 +1203,16 @@ func (s *StreamSession) newSegmentLocked() error {
 	return nil
 }
 
-func validateSegment(data []byte) (bool, string) {
-	if len(data) == 0 {
-		return false, "segment is empty"
+func validateSegment(
+	data []byte,
+) (bool, string, TSDiagnostics) {
+	diagnostics := diagnoseTS(data)
+
+	if diagnostics.Valid {
+		return true, "", diagnostics
 	}
 
-	if len(data)%188 != 0 {
-		return false, fmt.Sprintf(
-			"TS size %d is not divisible by 188",
-			len(data),
-		)
-	}
-
-	for i := 0; i < len(data); i += 188 {
-		if data[i] != 0x47 {
-			return false, fmt.Sprintf(
-				"TS sync byte missing at offset %d",
-				i,
-			)
-		}
-	}
-
-	return true, ""
+	return false, diagnostics.Error, diagnostics
 }
 
 func (s *StreamSession) finishSegmentLocked() {
@@ -510,21 +1220,28 @@ func (s *StreamSession) finishSegmentLocked() {
 		s.currentWriter == nil ||
 		s.currentBuffer == nil ||
 		s.currentBuffer.Len() == 0 {
+
 		return
 	}
 
-	duration := time.Since(s.segmentStart).Seconds()
+	duration :=
+		time.Since(
+			s.segmentStart,
+		).Seconds()
 
 	if duration <= 0 {
-		duration = segmentDuration.Seconds()
+		duration =
+			segmentDuration.Seconds()
 	}
 
-	data := append(
-		[]byte(nil),
-		s.currentBuffer.Bytes()...,
-	)
+	data :=
+		append(
+			[]byte(nil),
+			s.currentBuffer.Bytes()...,
+		)
 
-	valid, validateErr := validateSegment(data)
+	valid, validateErr, diagnostics :=
+		validateSegment(data)
 
 	if valid {
 		atomic.AddUint64(
@@ -533,9 +1250,17 @@ func (s *StreamSession) finishSegmentLocked() {
 		)
 
 		log.Printf(
-			"VERSION 12 TS VALID: packets=%d bytes=%d",
-			len(data)/188,
-			len(data),
+			"VERSION 13 TS MEDIA VALID: packets=%d bytes=%d PAT=%d PMT=%d videoPID=%d streamType=0x%02x PES=%d PTS=%d PCR=%d continuityErrors=%d",
+			diagnostics.Packets,
+			diagnostics.Bytes,
+			diagnostics.PATPackets,
+			diagnostics.PMTPackets,
+			diagnostics.VideoPID,
+			diagnostics.StreamType,
+			diagnostics.PESStartCodes,
+			diagnostics.PTSCount,
+			diagnostics.PCRPackets,
+			diagnostics.ContinuityErrors,
 		)
 	} else {
 		atomic.AddUint64(
@@ -544,34 +1269,60 @@ func (s *StreamSession) finishSegmentLocked() {
 		)
 
 		log.Printf(
-			"VERSION 12 TS VALIDATION FAILED: %s size=%d",
+			"VERSION 13 TS MEDIA INVALID: error=%s packets=%d PAT=%d PMT=%d videoPID=%d streamType=0x%02x PES=%d PTS=%d backwardPTS=%d PCR=%d continuityErrors=%d transportErrors=%d",
 			validateErr,
-			len(data),
+			diagnostics.Packets,
+			diagnostics.PATPackets,
+			diagnostics.PMTPackets,
+			diagnostics.VideoPID,
+			diagnostics.StreamType,
+			diagnostics.PESStartCodes,
+			diagnostics.PTSCount,
+			diagnostics.BackwardPTS,
+			diagnostics.PCRPackets,
+			diagnostics.ContinuityErrors,
+			diagnostics.TransportErrors,
 		)
 	}
 
 	segment := HLSSegment{
-		Sequence:    s.NextSequence,
-		Duration:    duration,
-		Data:        data,
-		Validated:   valid,
-		ValidateErr: validateErr,
+		Sequence:
+			s.NextSequence,
+
+		Duration:
+			duration,
+
+		Data:
+			data,
+
+		Validated:
+			valid,
+
+		ValidateErr:
+			validateErr,
+
+		Diagnostics:
+			diagnostics,
 	}
 
 	s.NextSequence++
 
-	s.Segments = append(
-		s.Segments,
-		segment,
-	)
-
-	if len(s.Segments) > maxSegments {
-		s.Segments = append(
-			[]HLSSegment(nil),
-			s.Segments[
-				len(s.Segments)-maxSegments:
-			]...,
+	s.Segments =
+		append(
+			s.Segments,
+			segment,
 		)
+
+	if len(s.Segments) >
+		maxSegments {
+
+		s.Segments =
+			append(
+				[]HLSSegment(nil),
+				s.Segments[
+					len(s.Segments)-maxSegments:
+				]...,
+			)
 	}
 
 	atomic.AddUint64(
@@ -580,7 +1331,7 @@ func (s *StreamSession) finishSegmentLocked() {
 	)
 
 	log.Printf(
-		"VERSION 12 HLS SEGMENT READY: sequence=%d duration=%.3f size=%d valid=%t",
+		"VERSION 13 HLS SEGMENT READY: sequence=%d duration=%.3f size=%d mediaValid=%t",
 		segment.Sequence,
 		segment.Duration,
 		len(segment.Data),
@@ -610,14 +1361,18 @@ func (s *StreamSession) keyframeAccessUnitLocked(
 
 	var out []byte
 
-	if !hasSPS && len(s.sps) > 0 {
+	if !hasSPS &&
+		len(s.sps) > 0 {
+
 		out = append(
 			out,
 			s.sps...,
 		)
 	}
 
-	if !hasPPS && len(s.pps) > 0 {
+	if !hasPPS &&
+		len(s.pps) > 0 {
+
 		out = append(
 			out,
 			s.pps...,
@@ -640,32 +1395,43 @@ func (s *StreamSession) writeAccessUnit(
 	defer s.mu.Unlock()
 
 	select {
+
 	case <-s.done:
 		return fmt.Errorf(
 			"stream session closed",
 		)
+
 	default:
 	}
 
-	s.cacheParametersLocked(accessUnit)
+	s.cacheParametersLocked(
+		accessUnit,
+	)
 
 	hasIDR, _, _, _, _ :=
-		inspectAccessUnit(accessUnit)
+		inspectAccessUnit(
+			accessUnit,
+		)
 
 	s.lastNALSummary =
-		naluSummary(accessUnit)
+		naluSummary(
+			accessUnit,
+		)
 
 	if !s.segmentActive {
 		if !hasIDR {
 			return nil
 		}
 
-		if err := s.newSegmentLocked(); err != nil {
+		if err :=
+			s.newSegmentLocked();
+			err != nil {
+
 			return err
 		}
 
 		log.Printf(
-			"VERSION 12 HLS started on IDR: SPS=%t PPS=%t PTS=%d NAL=%s",
+			"VERSION 13 HLS started on IDR: SPS=%t PPS=%t PTS=%d NAL=%s",
 			len(s.sps) > 0,
 			len(s.pps) > 0,
 			pts,
@@ -676,16 +1442,21 @@ func (s *StreamSession) writeAccessUnit(
 	if hasIDR &&
 		s.currentBuffer != nil &&
 		s.currentBuffer.Len() > 0 &&
-		time.Since(s.segmentStart) >= segmentDuration {
+		time.Since(
+			s.segmentStart,
+		) >= segmentDuration {
 
 		s.finishSegmentLocked()
 
-		if err := s.newSegmentLocked(); err != nil {
+		if err :=
+			s.newSegmentLocked();
+			err != nil {
+
 			return err
 		}
 
 		log.Printf(
-			"VERSION 12 new IDR segment: sequence=%d PTS=%d NAL=%s",
+			"VERSION 13 new IDR segment: sequence=%d PTS=%d NAL=%s",
 			s.NextSequence,
 			pts,
 			s.lastNALSummary,
@@ -693,7 +1464,9 @@ func (s *StreamSession) writeAccessUnit(
 	}
 
 	outputAU :=
-		s.keyframeAccessUnitLocked(accessUnit)
+		s.keyframeAccessUnitLocked(
+			accessUnit,
+		)
 
 	return s.currentWriter.WriteH264(
 		videoPID,
@@ -757,75 +1530,102 @@ func createStreamSession(
 	camera Camera,
 	cameraIndex int,
 ) (*StreamSession, error) {
+	mediaEngine :=
+		&webrtc.MediaEngine{}
 
-	mediaEngine := &webrtc.MediaEngine{}
+	err :=
+		mediaEngine.RegisterCodec(
+			webrtc.RTPCodecParameters{
+				RTPCodecCapability:
+					webrtc.RTPCodecCapability{
+						MimeType:
+							webrtc.MimeTypeOpus,
 
-	err := mediaEngine.RegisterCodec(
-		webrtc.RTPCodecParameters{
-			RTPCodecCapability:
-				webrtc.RTPCodecCapability{
-					MimeType:
-						webrtc.MimeTypeOpus,
-					ClockRate: 48000,
-					Channels:  2,
-				},
-			PayloadType: 111,
-		},
-		webrtc.RTPCodecTypeAudio,
-	)
+						ClockRate:
+							48000,
 
-	if err != nil {
-		return nil, err
-	}
+						Channels:
+							2,
+					},
 
-	err = mediaEngine.RegisterCodec(
-		webrtc.RTPCodecParameters{
-			RTPCodecCapability:
-				webrtc.RTPCodecCapability{
-					MimeType:
-						webrtc.MimeTypeH264,
-					ClockRate: 90000,
-					SDPFmtpLine:
-						"level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=42e01f",
-				},
-			PayloadType: 102,
-		},
-		webrtc.RTPCodecTypeVideo,
-	)
+				PayloadType:
+					111,
+			},
+			webrtc.RTPCodecTypeAudio,
+		)
 
 	if err != nil {
 		return nil, err
 	}
 
-	api := webrtc.NewAPI(
-		webrtc.WithMediaEngine(
-			mediaEngine,
-		),
-	)
+	err =
+		mediaEngine.RegisterCodec(
+			webrtc.RTPCodecParameters{
+				RTPCodecCapability:
+					webrtc.RTPCodecCapability{
+						MimeType:
+							webrtc.MimeTypeH264,
 
-	pc, err := api.NewPeerConnection(
-		webrtc.Configuration{},
-	)
+						ClockRate:
+							90000,
+
+						SDPFmtpLine:
+							"level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=42e01f",
+					},
+
+				PayloadType:
+					102,
+			},
+			webrtc.RTPCodecTypeVideo,
+		)
 
 	if err != nil {
 		return nil, err
 	}
 
-	session := &StreamSession{
-		PC:     pc,
-		Stats:  &MediaStats{},
-		Camera: camera,
-		Index:  cameraIndex,
-		ready:  make(chan struct{}),
-		done:   make(chan struct{}),
+	api :=
+		webrtc.NewAPI(
+			webrtc.WithMediaEngine(
+				mediaEngine,
+			),
+		)
+
+	pc, err :=
+		api.NewPeerConnection(
+			webrtc.Configuration{},
+		)
+
+	if err != nil {
+		return nil, err
 	}
+
+	session :=
+		&StreamSession{
+			PC:
+				pc,
+
+			Stats:
+				&MediaStats{},
+
+			Camera:
+				camera,
+
+			Index:
+				cameraIndex,
+
+			ready:
+				make(chan struct{}),
+
+			done:
+				make(chan struct{}),
+		}
 
 	pc.OnConnectionStateChange(
 		func(
 			state webrtc.PeerConnectionState,
 		) {
 			log.Printf(
-				"VERSION 12 WebRTC state: %s",
+				"VERSION 13 WebRTC state: %s",
 				state.String(),
 			)
 		},
@@ -836,10 +1636,11 @@ func createStreamSession(
 			track *webrtc.TrackRemote,
 			receiver *webrtc.RTPReceiver,
 		) {
-			codec := track.Codec()
+			codec :=
+				track.Codec()
 
 			log.Printf(
-				"VERSION 12 incoming track: kind=%s codec=%s payload=%d",
+				"VERSION 13 incoming track: kind=%s codec=%s payload=%d",
 				track.Kind().String(),
 				codec.MimeType,
 				codec.PayloadType,
@@ -863,9 +1664,10 @@ func createStreamSession(
 
 						if err != nil {
 							log.Println(
-								"VERSION 12 video RTP ended:",
+								"VERSION 13 video RTP ended:",
 								err,
 							)
+
 							return
 						}
 
@@ -878,15 +1680,21 @@ func createStreamSession(
 						atomic.AddUint64(
 							&session.Stats.VideoBytes,
 							uint64(
-								len(packet.Payload),
+								len(
+									packet.Payload,
+								),
 							),
 						)
 
-						if len(packet.Payload) == 0 {
+						if len(
+							packet.Payload,
+						) == 0 {
+
 							atomic.AddUint64(
 								&session.Stats.EmptyPackets,
 								1,
 							)
+
 							continue
 						}
 
@@ -894,7 +1702,8 @@ func createStreamSession(
 							accessUnitTimestamp =
 								packet.Timestamp
 
-							haveTimestamp = true
+							haveTimestamp =
+								true
 						}
 
 						h264Data, err :=
@@ -904,21 +1713,24 @@ func createStreamSession(
 
 						if err != nil {
 							log.Printf(
-								"VERSION 12 H264 depacketize error: %v",
+								"VERSION 13 H264 depacketize error: %v",
 								err,
 							)
 
 							accessUnit = nil
-							haveTimestamp = false
+
+							haveTimestamp =
+								false
 
 							continue
 						}
 
 						if len(h264Data) > 0 {
-							accessUnit = append(
-								accessUnit,
-								h264Data...,
-							)
+							accessUnit =
+								append(
+									accessUnit,
+									h264Data...,
+								)
 						}
 
 						if packet.Marker &&
@@ -939,10 +1751,11 @@ func createStreamSession(
 								session.writeAccessUnit(
 									accessUnit,
 									pts,
-								); err != nil {
+								);
+								err != nil {
 
 								log.Printf(
-									"VERSION 12 MPEGTS write error: %v",
+									"VERSION 13 MPEGTS write error: %v",
 									err,
 								)
 							}
@@ -951,7 +1764,7 @@ func createStreamSession(
 								units%30 == 0 {
 
 								log.Printf(
-									"VERSION 12 H264 AU: units=%d packets=%d size=%d PTS=%d NAL=%s",
+									"VERSION 13 H264 AU: units=%d packets=%d size=%d PTS=%d NAL=%s",
 									units,
 									packets,
 									len(accessUnit),
@@ -963,7 +1776,9 @@ func createStreamSession(
 							}
 
 							accessUnit = nil
-							haveTimestamp = false
+
+							haveTimestamp =
+								false
 						}
 					}
 				}()
@@ -979,13 +1794,17 @@ func createStreamSession(
 
 						if err != nil {
 							log.Println(
-								"VERSION 12 audio RTP ended:",
+								"VERSION 13 audio RTP ended:",
 								err,
 							)
+
 							return
 						}
 
-						if len(packet.Payload) == 0 {
+						if len(
+							packet.Payload,
+						) == 0 {
+
 							continue
 						}
 
@@ -997,7 +1816,9 @@ func createStreamSession(
 						atomic.AddUint64(
 							&session.Stats.AudioBytes,
 							uint64(
-								len(packet.Payload),
+								len(
+									packet.Payload,
+								),
 							),
 						)
 					}
@@ -1005,69 +1826,82 @@ func createStreamSession(
 			}
 		},
 	)
-		_, err = pc.AddTransceiverFromKind(
-		webrtc.RTPCodecTypeAudio,
-		webrtc.RTPTransceiverInit{
-			Direction:
-				webrtc.RTPTransceiverDirectionRecvonly,
-		},
-	)
+
+	_, err =
+		pc.AddTransceiverFromKind(
+			webrtc.RTPCodecTypeAudio,
+			webrtc.RTPTransceiverInit{
+				Direction:
+					webrtc.RTPTransceiverDirectionRecvonly,
+			},
+		)
 
 	if err != nil {
 		session.Close()
 		return nil, err
 	}
 
-	_, err = pc.AddTransceiverFromKind(
-		webrtc.RTPCodecTypeVideo,
-		webrtc.RTPTransceiverInit{
-			Direction:
-				webrtc.RTPTransceiverDirectionRecvonly,
-		},
-	)
+	_, err =
+		pc.AddTransceiverFromKind(
+			webrtc.RTPCodecTypeVideo,
+			webrtc.RTPTransceiverInit{
+				Direction:
+					webrtc.RTPTransceiverDirectionRecvonly,
+			},
+		)
 
 	if err != nil {
 		session.Close()
 		return nil, err
 	}
 
-	_, err = pc.CreateDataChannel(
-		"nestview",
-		nil,
-	)
+	_, err =
+		pc.CreateDataChannel(
+			"nestview",
+			nil,
+		)
 
 	if err != nil {
 		session.Close()
 		return nil, err
 	}
 
-	offer, err := pc.CreateOffer(nil)
+	offer, err :=
+		pc.CreateOffer(nil)
 
 	if err != nil {
 		session.Close()
 		return nil, err
 	}
 
-	if err = pc.SetLocalDescription(
-		offer,
-	); err != nil {
+	if err =
+		pc.SetLocalDescription(
+			offer,
+		);
+		err != nil {
+
 		session.Close()
 		return nil, err
 	}
 
 	waitForICE(pc)
 
-	local := pc.LocalDescription()
+	local :=
+		pc.LocalDescription()
 
 	if local == nil {
 		session.Close()
+
 		return nil,
-			fmt.Errorf("local SDP missing")
+			fmt.Errorf(
+				"local SDP missing",
+			)
 	}
 
-	upperSDP := strings.ToUpper(
-		local.SDP,
-	)
+	upperSDP :=
+		strings.ToUpper(
+			local.SDP,
+		)
 
 	if !strings.Contains(
 		upperSDP,
@@ -1093,20 +1927,23 @@ func createStreamSession(
 			)
 	}
 
-	audioPos := strings.Index(
-		local.SDP,
-		"m=audio",
-	)
+	audioPos :=
+		strings.Index(
+			local.SDP,
+			"m=audio",
+		)
 
-	videoPos := strings.Index(
-		local.SDP,
-		"m=video",
-	)
+	videoPos :=
+		strings.Index(
+			local.SDP,
+			"m=video",
+		)
 
-	appPos := strings.Index(
-		local.SDP,
-		"m=application",
-	)
+	appPos :=
+		strings.Index(
+			local.SDP,
+			"m=application",
+		)
 
 	if audioPos == -1 ||
 		videoPos == -1 ||
@@ -1132,30 +1969,38 @@ func createStreamSession(
 	}
 
 	log.Println(
-		"VERSION 12 SDP confirmed: audio -> video -> application",
+		"VERSION 13 SDP confirmed: audio -> video -> application",
 	)
 
-	payload := map[string]string{
-		"device":   camera.Device,
-		"offerSdp": local.SDP,
-	}
+	payload :=
+		map[string]string{
+			"device":
+				camera.Device,
 
-	data, err := json.Marshal(payload)
+			"offerSdp":
+				local.SDP,
+		}
+
+	data, err :=
+		json.Marshal(payload)
 
 	if err != nil {
 		session.Close()
 		return nil, err
 	}
 
-	client := &http.Client{
-		Timeout: 30 * time.Second,
-	}
+	client :=
+		&http.Client{
+			Timeout:
+				30 * time.Second,
+		}
 
-	resp, err := client.Post(
-		nestBackend+"/api/webrtc",
-		"application/json",
-		bytes.NewReader(data),
-	)
+	resp, err :=
+		client.Post(
+			nestBackend+"/api/webrtc",
+			"application/json",
+			bytes.NewReader(data),
+		)
 
 	if err != nil {
 		session.Close()
@@ -1164,9 +2009,10 @@ func createStreamSession(
 
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(
-		resp.Body,
-	)
+	body, err :=
+		io.ReadAll(
+			resp.Body,
+		)
 
 	if err != nil {
 		session.Close()
@@ -1174,7 +2020,7 @@ func createStreamSession(
 	}
 
 	log.Printf(
-		"VERSION 12 Nest backend HTTP status: %d",
+		"VERSION 13 Nest backend HTTP status: %d",
 		resp.StatusCode,
 	)
 
@@ -1193,10 +2039,12 @@ func createStreamSession(
 
 	var result interface{}
 
-	if err := json.Unmarshal(
-		body,
-		&result,
-	); err != nil {
+	if err :=
+		json.Unmarshal(
+			body,
+			&result,
+		);
+		err != nil {
 
 		session.Close()
 
@@ -1207,7 +2055,8 @@ func createStreamSession(
 			)
 	}
 
-	answer := findAnswerSDP(result)
+	answer :=
+		findAnswerSDP(result)
 
 	if answer == "" {
 		session.Close()
@@ -1218,19 +2067,24 @@ func createStreamSession(
 			)
 	}
 
-	if err = pc.SetRemoteDescription(
-		webrtc.SessionDescription{
-			Type: webrtc.SDPTypeAnswer,
-			SDP:  answer,
-		},
-	); err != nil {
+	if err =
+		pc.SetRemoteDescription(
+			webrtc.SessionDescription{
+				Type:
+					webrtc.SDPTypeAnswer,
+
+				SDP:
+					answer,
+			},
+		);
+		err != nil {
 
 		session.Close()
 		return nil, err
 	}
 
 	log.Println(
-		"VERSION 12 Nest WebRTC session started",
+		"VERSION 13 Nest WebRTC session started",
 	)
 
 	return session, nil
@@ -1240,12 +2094,15 @@ func health(
 	w http.ResponseWriter,
 	r *http.Request,
 ) {
-	session := getSession()
+	session :=
+		getSession()
 
 	streaming := false
 
 	var segments uint64
 	var validated uint64
+	var validationErrors uint64
+	var discontinuities uint64
 
 	if session != nil {
 		segments =
@@ -1258,20 +2115,32 @@ func health(
 				&session.Stats.ValidatedTS,
 			)
 
-		streaming = segments > 0
+		validationErrors =
+			atomic.LoadUint64(
+				&session.Stats.ValidationError,
+			)
+
+		discontinuities =
+			atomic.LoadUint64(
+				&session.Stats.TimestampDiscontinuities,
+			)
+
+		streaming =
+			segments > 0
 	}
 
 	writeJSON(
 		w,
 		200,
 		map[string]interface{}{
-			"status": "ok",
+			"status":
+				"ok",
 
 			"bridge":
 				"pion-h264-hls",
 
 			"version":
-				12,
+				13,
 
 			"streaming":
 				streaming,
@@ -1282,13 +2151,19 @@ func health(
 			"validatedTS":
 				validated,
 
-			"timestamps":
-				"normalized-90khz-offset",
+			"validationErrors":
+				validationErrors,
+
+			"timestampDiscontinuities":
+				discontinuities,
+
+			"diagnostics":
+				"PAT-PMT-PES-PTS-PCR-continuity",
 
 			"timestampOffset":
 				ptsOffset,
 
-			"selfCheck":
+			"mediaSelfCheck":
 				true,
 		},
 	)
@@ -1298,7 +2173,9 @@ func start(
 	w http.ResponseWriter,
 	r *http.Request,
 ) {
-	if r.Method != http.MethodPost {
+	if r.Method !=
+		http.MethodPost {
+
 		writeJSON(
 			w,
 			405,
@@ -1311,9 +2188,10 @@ func start(
 		return
 	}
 
-	body, err := io.ReadAll(
-		r.Body,
-	)
+	body, err :=
+		io.ReadAll(
+			r.Body,
+		)
 
 	if err != nil {
 		writeJSON(
@@ -1329,16 +2207,18 @@ func start(
 	}
 
 	log.Printf(
-		"VERSION 12 Shortcut body: %q",
+		"VERSION 13 Shortcut body: %q",
 		string(body),
 	)
 
 	var rawRequest map[string]interface{}
 
-	if err := json.Unmarshal(
-		body,
-		&rawRequest,
-	); err != nil {
+	if err :=
+		json.Unmarshal(
+			body,
+			&rawRequest,
+		);
+		err != nil {
 
 		writeJSON(
 			w,
@@ -1361,24 +2241,34 @@ func start(
 
 		if strings.TrimSpace(key) !=
 			"camera" {
+
 			continue
 		}
 
 		switch v := value.(type) {
 
 		case float64:
-			cameraIndex = int(v)
-			cameraFound = true
+
+			cameraIndex =
+				int(v)
+
+			cameraFound =
+				true
 
 		case string:
-			v = strings.TrimSpace(v)
+
+			v =
+				strings.TrimSpace(v)
 
 			if parsed, parseErr :=
 				strconv.Atoi(v);
 				parseErr == nil {
 
-				cameraIndex = parsed
-				cameraFound = true
+				cameraIndex =
+					parsed
+
+				cameraFound =
+					true
 			}
 		}
 	}
@@ -1396,7 +2286,8 @@ func start(
 		return
 	}
 
-	cameras, err := getCameras()
+	cameras, err :=
+		getCameras()
 
 	if err != nil {
 		writeJSON(
@@ -1426,10 +2317,11 @@ func start(
 		return
 	}
 
-	camera := cameras[cameraIndex]
+	camera :=
+		cameras[cameraIndex]
 
 	log.Printf(
-		"VERSION 12 starting camera %d: %s",
+		"VERSION 13 starting camera %d: %s",
 		cameraIndex,
 		camera.Name,
 	)
@@ -1442,7 +2334,7 @@ func start(
 
 	if err != nil {
 		log.Println(
-			"VERSION 12 camera start failed:",
+			"VERSION 13 camera start failed:",
 			err,
 		)
 
@@ -1463,19 +2355,24 @@ func start(
 	select {
 
 	case <-session.ready:
+
 		log.Println(
-			"VERSION 12 HLS READY",
+			"VERSION 13 HLS READY",
 		)
 
 	case <-time.After(
 		25 * time.Second,
 	):
+
 		session.Close()
 
 		sessionMu.Lock()
 
-		if currentSession == session {
-			currentSession = nil
+		if currentSession ==
+			session {
+
+			currentSession =
+				nil
 		}
 
 		sessionMu.Unlock()
@@ -1491,6 +2388,19 @@ func start(
 
 		return
 	}
+
+	session.mu.RLock()
+
+	var diagnostic interface{}
+
+	if len(session.Segments) > 0 {
+		diagnostic =
+			session.Segments[
+				len(session.Segments)-1
+			].Diagnostics
+	}
+
+	session.mu.RUnlock()
 
 	writeJSON(
 		w,
@@ -1511,8 +2421,14 @@ func start(
 			"hls":
 				"/live/index.m3u8",
 
+			"diagnosticSegment":
+				"/debug/latest.ts",
+
+			"diagnostics":
+				"/debug/ts",
+
 			"version":
-				12,
+				13,
 
 			"videoPackets":
 				atomic.LoadUint64(
@@ -1543,6 +2459,14 @@ func start(
 				atomic.LoadUint64(
 					&session.Stats.ValidationError,
 				),
+
+			"timestampDiscontinuities":
+				atomic.LoadUint64(
+					&session.Stats.TimestampDiscontinuities,
+				),
+
+			"lastDiagnostic":
+				diagnostic,
 		},
 	)
 }
@@ -1558,7 +2482,7 @@ func statusHandler(
 			200,
 			map[string]interface{}{
 				"streaming": false,
-				"version":   12,
+				"version":   13,
 			},
 		)
 
@@ -1567,10 +2491,17 @@ func statusHandler(
 
 	session.mu.RLock()
 
-	hasSPS := len(session.sps) > 0
-	hasPPS := len(session.pps) > 0
-	pts := session.normalizedPTS
-	nalSummary := session.lastNALSummary
+	hasSPS :=
+		len(session.sps) > 0
+
+	hasPPS :=
+		len(session.pps) > 0
+
+	pts :=
+		session.normalizedPTS
+
+	nalSummary :=
+		session.lastNALSummary
 
 	var lastSegment interface{}
 
@@ -1578,7 +2509,6 @@ func statusHandler(
 		seg :=
 			session.Segments[
 				len(session.Segments)-1]
-			
 
 		lastSegment =
 			map[string]interface{}{
@@ -1596,6 +2526,12 @@ func statusHandler(
 
 				"validationErr":
 					seg.ValidateErr,
+
+				"diagnostics":
+					seg.Diagnostics,
+
+				"download":
+					"/debug/latest.ts",
 			}
 	}
 
@@ -1609,7 +2545,7 @@ func statusHandler(
 				true,
 
 			"version":
-				12,
+				13,
 
 			"camera":
 				session.Index,
@@ -1657,6 +2593,11 @@ func statusHandler(
 					&session.Stats.ValidationError,
 				),
 
+			"timestampDiscontinuities":
+				atomic.LoadUint64(
+					&session.Stats.TimestampDiscontinuities,
+				),
+
 			"sps":
 				hasSPS,
 
@@ -1671,8 +2612,224 @@ func statusHandler(
 
 			"lastSegment":
 				lastSegment,
+
+			"diagnosticSegment":
+				"/debug/latest.ts",
+
+			"diagnostics":
+				"/debug/ts",
 		},
 	)
+}
+
+func diagnosticsHandler(
+	w http.ResponseWriter,
+	r *http.Request,
+) {
+	session := getSession()
+
+	if session == nil {
+		writeJSON(
+			w,
+			404,
+			map[string]interface{}{
+				"error":
+					"no active stream",
+
+				"version":
+					13,
+			},
+		)
+
+		return
+	}
+
+	session.mu.RLock()
+
+	if len(session.Segments) == 0 {
+		session.mu.RUnlock()
+
+		writeJSON(
+			w,
+			503,
+			map[string]interface{}{
+				"error":
+					"no completed segment yet",
+
+				"version":
+					13,
+			},
+		)
+
+		return
+	}
+
+	segments :=
+		make(
+			[]map[string]interface{},
+			0,
+			len(session.Segments),
+		)
+
+	for _, segment :=
+		range session.Segments {
+
+		segments =
+			append(
+				segments,
+				map[string]interface{}{
+					"sequence":
+						segment.Sequence,
+
+					"duration":
+						segment.Duration,
+
+					"bytes":
+						len(segment.Data),
+
+					"validated":
+						segment.Validated,
+
+					"validationErr":
+						segment.ValidateErr,
+
+					"diagnostics":
+						segment.Diagnostics,
+
+					"url":
+						fmt.Sprintf(
+							"/live/segment%d.ts",
+							segment.Sequence,
+						),
+				},
+			)
+	}
+
+	last :=
+		session.Segments[
+			len(session.Segments)-1]
+
+	session.mu.RUnlock()
+
+	writeJSON(
+		w,
+		200,
+		map[string]interface{}{
+			"version":
+				13,
+
+			"camera":
+				session.Index,
+
+			"name":
+				session.Camera.Name,
+
+			"segments":
+				segments,
+
+			"latestSequence":
+				last.Sequence,
+
+			"latestSegment":
+				"/debug/latest.ts",
+
+			"playlist":
+				"/live/index.m3u8",
+
+			"validatedTS":
+				atomic.LoadUint64(
+					&session.Stats.ValidatedTS,
+				),
+
+			"validationErrors":
+				atomic.LoadUint64(
+					&session.Stats.ValidationError,
+				),
+
+			"timestampDiscontinuities":
+				atomic.LoadUint64(
+					&session.Stats.TimestampDiscontinuities,
+				),
+		},
+	)
+}
+
+func latestSegmentHandler(
+	w http.ResponseWriter,
+	r *http.Request,
+) {
+	session := getSession()
+
+	if session == nil {
+		http.Error(
+			w,
+			"no active stream",
+			http.StatusNotFound,
+		)
+
+		return
+	}
+
+	session.mu.RLock()
+
+	if len(session.Segments) == 0 {
+		session.mu.RUnlock()
+
+		http.Error(
+			w,
+			"no completed segment",
+			http.StatusServiceUnavailable,
+		)
+
+		return
+	}
+
+	segment :=
+		session.Segments[
+			len(session.Segments)-1]
+
+	data :=
+		append(
+			[]byte(nil),
+			segment.Data...,
+		)
+
+	sequence :=
+		segment.Sequence
+
+	session.mu.RUnlock()
+
+	w.Header().Set(
+		"Content-Type",
+		"video/mp2t",
+	)
+
+	w.Header().Set(
+		"Content-Disposition",
+		fmt.Sprintf(
+			`attachment; filename="nestview-v13-segment-%d.ts"`,
+			sequence,
+		),
+	)
+
+	w.Header().Set(
+		"Cache-Control",
+		"no-store, no-cache, must-revalidate",
+	)
+
+	w.Header().Set(
+		"Access-Control-Allow-Origin",
+		"*",
+	)
+
+	w.Header().Set(
+		"Content-Length",
+		strconv.Itoa(
+			len(data),
+		),
+	)
+
+	_, _ = w.Write(data)
 }
 
 func playlistHandler(
@@ -1719,8 +2876,11 @@ func playlistHandler(
 				),
 			)
 
-		if duration > targetDuration {
-			targetDuration = duration
+		if duration >
+			targetDuration {
+
+			targetDuration =
+				duration
 		}
 	}
 
@@ -1787,11 +2947,12 @@ func playlistHandler(
 		"*",
 	)
 
-	_, _ = w.Write(
-		[]byte(
-			playlist.String(),
-		),
-	)
+	_, _ =
+		w.Write(
+			[]byte(
+				playlist.String(),
+			),
+		)
 }
 
 func segmentHandler(
@@ -1856,9 +3017,10 @@ func segmentHandler(
 				),
 			)
 
-			_, _ = w.Write(
-				segment.Data,
-			)
+			_, _ =
+				w.Write(
+					segment.Data,
+				)
 
 			return
 		}
@@ -1873,8 +3035,11 @@ func stopHandler(
 ) {
 	sessionMu.Lock()
 
-	session := currentSession
-	currentSession = nil
+	session :=
+		currentSession
+
+	currentSession =
+		nil
 
 	sessionMu.Unlock()
 
@@ -1890,7 +3055,7 @@ func stopHandler(
 				"stopped",
 
 			"version":
-				12,
+				13,
 		},
 	)
 }
@@ -1914,6 +3079,16 @@ func main() {
 	http.HandleFunc(
 		"/stop",
 		stopHandler,
+	)
+
+	http.HandleFunc(
+		"/debug/ts",
+		diagnosticsHandler,
+	)
+
+	http.HandleFunc(
+		"/debug/latest.ts",
+		latestSegmentHandler,
 	)
 
 	http.HandleFunc(
@@ -1960,18 +3135,24 @@ func main() {
 					"timestampOffset":
 						ptsOffset,
 
-					"mpegTSSelfCheck":
-						true,
+					"mediaDiagnostics":
+						"PAT-PMT-PES-PTS-PCR-continuity",
+
+					"diagnosticSegment":
+						"/debug/latest.ts",
+
+					"diagnostics":
+						"/debug/ts",
 
 					"version":
-						12,
+						13,
 				},
 			)
 		},
 	)
 
 	log.Println(
-		"NestView TV Pion HLS Bridge VERSION 12 running on port " +
+		"NestView TV Pion HLS Bridge VERSION 13 running on port " +
 			port,
 	)
 
