@@ -1577,7 +1577,7 @@ func statusHandler(
 	if len(session.Segments) > 0 {
 		seg :=
 			session.Segments[
-				len(session.Segments)-1
+				len(session.Segments)-1:
 			]
 
 		lastSegment =
