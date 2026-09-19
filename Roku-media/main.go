@@ -1578,7 +1578,7 @@ func statusHandler(
 		seg :=
 			session.Segments[
 				len(session.Segments)-1]
-			]
+			
 
 		lastSegment =
 			map[string]interface{}{
