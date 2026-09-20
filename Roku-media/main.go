@@ -104,7 +104,7 @@ type TSDiagnostics struct {
 	NullPackets  int `json:"nullPackets"`
 
 	TransportErrors int `json:"transportErrors"`
-	PayloadPackets   int `json:"payloadPackets"`
+	PayloadPackets  int `json:"payloadPackets"`
 
 	AdaptationPackets int `json:"adaptationPackets"`
 	PCRPackets        int `json:"pcrPackets"`
@@ -166,7 +166,7 @@ type H264Diagnostics struct {
 
 	MaxNumRefFrames uint64 `json:"maxNumRefFrames"`
 
-	PicWidthInMbs        int `json:"picWidthInMbs"`
+	PicWidthInMbs       int `json:"picWidthInMbs"`
 	PicHeightInMapUnits int `json:"picHeightInMapUnits"`
 
 	FrameMbsOnly bool `json:"frameMbsOnly"`
@@ -356,7 +356,7 @@ type StreamSession struct {
 	*/
 	lastMuxNALSummary string
 	lastMuxBytes      int
-	lastMuxPrefixHex string
+	lastMuxPrefixHex  string
 
 	haveLastPOC bool
 	lastPOC     uint64
@@ -375,6 +375,7 @@ var (
 
 	frozenVOD FrozenVOD
 )
+
 func copyHLSSegment(source HLSSegment) HLSSegment {
 	copied := source
 	copied.Data = append([]byte(nil), source.Data...)
@@ -764,10 +765,10 @@ func annexB(nalu []byte) []byte {
 }
 
 /*
-	normalizeAnnexBAccessUnit rebuilds every access unit with
-	one canonical four-byte Annex-B start code before every NAL.
+normalizeAnnexBAccessUnit rebuilds every access unit with
+one canonical four-byte Annex-B start code before every NAL.
 
-	This is the first V19 media-path change.
+This is the first V19 media-path change.
 */
 func normalizeAnnexBAccessUnit(
 	data []byte,
@@ -1047,7 +1048,7 @@ func (b *bitReader) readUE() (uint64, error) {
 		return 0, err
 	}
 
-	return (uint64(1)<<zeros) - 1 + suffix, nil
+	return (uint64(1) << zeros) - 1 + suffix, nil
 }
 
 func (b *bitReader) readSE() (int64, error) {
@@ -2282,7 +2283,7 @@ func diagnoseTS(data []byte) TSDiagnostics {
 						programPos+4 <= len(payload) {
 
 						programNumber := binary.BigEndian.Uint16(
-							payload[programPos:programPos+2],
+							payload[programPos : programPos+2],
 						)
 
 						programPID := int(
@@ -2421,17 +2422,18 @@ func diagnoseTS(data []byte) TSDiagnostics {
 
 	return d
 }
+
 type TSReadbackDiagnostics struct {
-	Success          bool   `json:"success"`
-	AccessUnits      int    `json:"accessUnits"`
-	RandomAccessUnits int   `json:"randomAccessUnits"`
-	FirstPTS         int64  `json:"firstPTS"`
-	LastPTS          int64  `json:"lastPTS"`
-	FirstDTS         int64  `json:"firstDTS"`
-	LastDTS          int64  `json:"lastDTS"`
-	FirstNAL         string `json:"firstNAL"`
-	LastNAL          string `json:"lastNAL"`
-	Error            string `json:"error,omitempty"`
+	Success           bool   `json:"success"`
+	AccessUnits       int    `json:"accessUnits"`
+	RandomAccessUnits int    `json:"randomAccessUnits"`
+	FirstPTS          int64  `json:"firstPTS"`
+	LastPTS           int64  `json:"lastPTS"`
+	FirstDTS          int64  `json:"firstDTS"`
+	LastDTS           int64  `json:"lastDTS"`
+	FirstNAL          string `json:"firstNAL"`
+	LastNAL           string `json:"lastNAL"`
+	Error             string `json:"error,omitempty"`
 }
 
 func readbackTS(data []byte) TSReadbackDiagnostics {
@@ -2461,10 +2463,6 @@ func readbackTS(data []byte) TSReadbackDiagnostics {
 
 		d.AccessUnits++
 
-		
-			
-		
-
 		if d.FirstPTS < 0 {
 			d.FirstPTS = au.PTS
 			d.FirstDTS = au.DTS
@@ -2479,6 +2477,178 @@ func readbackTS(data []byte) TSReadbackDiagnostics {
 	d.Success = d.AccessUnits > 0
 	return d
 }
+
+type SPSOccurrence struct {
+	AUNumber    int             `json:"auNumber"`
+	PTS         int64           `json:"pts"`
+	DTS         int64           `json:"dts"`
+	Hex         string          `json:"hex"`
+	Diagnostics H264Diagnostics `json:"diagnostics"`
+}
+
+type PPSOccurrence struct {
+	AUNumber int    `json:"auNumber"`
+	PTS      int64  `json:"pts"`
+	DTS      int64  `json:"dts"`
+	Hex      string `json:"hex"`
+}
+
+type H264ReadbackCompatibility struct {
+	Success                     bool            `json:"success"`
+	AccessUnits                 int             `json:"accessUnits"`
+	IDRAccessUnits              int             `json:"idrAccessUnits"`
+	NonIDRAccessUnits           int             `json:"nonIDRAccessUnits"`
+	AccessUnitsWithAUD          int             `json:"accessUnitsWithAUD"`
+	SPSNALUnits                 int             `json:"spsNALUnits"`
+	PPSNALUnits                 int             `json:"ppsNALUnits"`
+	IDRWithSPS                  int             `json:"idrWithSPS"`
+	IDRWithPPS                  int             `json:"idrWithPPS"`
+	IDRWithSPSAndPPS            int             `json:"idrWithSPSAndPPS"`
+	IDRMissingSPSOrPPS          int             `json:"idrMissingSPSOrPPS"`
+	AllIDRHaveSPSAndPPS         bool            `json:"allIDRHaveSPSAndPPS"`
+	UniqueSPS                   int             `json:"uniqueSPS"`
+	UniquePPS                   int             `json:"uniquePPS"`
+	SPSChanges                  int             `json:"spsChanges"`
+	PPSChanges                  int             `json:"ppsChanges"`
+	MultipleSPSInSegment        bool            `json:"multipleSPSInSegment"`
+	MultiplePPSInSegment        bool            `json:"multiplePPSInSegment"`
+	MultipleCodecConfigurations bool            `json:"multipleCodecConfigurations"`
+	SPSParseErrors              int             `json:"spsParseErrors"`
+	AllSPSParseValid            bool            `json:"allSPSParseValid"`
+	FirstNAL                    string          `json:"firstNAL"`
+	LastNAL                     string          `json:"lastNAL"`
+	SPS                         []SPSOccurrence `json:"sps"`
+	PPS                         []PPSOccurrence `json:"pps"`
+	Error                       string          `json:"error,omitempty"`
+}
+
+func analyzeReadbackH264(data []byte) H264ReadbackCompatibility {
+	d := H264ReadbackCompatibility{
+		AllSPSParseValid: true,
+	}
+
+	reader, err := mpegts.NewReader(bytes.NewReader(data))
+	if err != nil {
+		d.Error = err.Error()
+		return d
+	}
+
+	seenSPS := make(map[string]bool)
+	seenPPS := make(map[string]bool)
+	lastSPSHex := ""
+	lastPPSHex := ""
+	var latestPPS []byte
+
+	for {
+		au, err := reader.NextAccessUnit()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			d.Error = err.Error()
+			return d
+		}
+
+		d.AccessUnits++
+		auNumber := d.AccessUnits
+		summary := naluSummary(au.Data)
+		if d.FirstNAL == "" {
+			d.FirstNAL = summary
+		}
+		d.LastNAL = summary
+
+		var auSPSNALs [][]byte
+		var auPPSNALs [][]byte
+		hasIDR := false
+		hasNonIDR := false
+		hasAUD := false
+
+		for _, nalu := range splitAnnexB(au.Data) {
+			if len(nalu) == 0 {
+				continue
+			}
+			switch nalu[0] & 0x1F {
+			case 1:
+				hasNonIDR = true
+			case 5:
+				hasIDR = true
+			case 7:
+				d.SPSNALUnits++
+				auSPSNALs = append(auSPSNALs, append([]byte(nil), nalu...))
+			case 8:
+				d.PPSNALUnits++
+				auPPSNALs = append(auPPSNALs, append([]byte(nil), nalu...))
+			case 9:
+				hasAUD = true
+			}
+		}
+
+		if hasAUD {
+			d.AccessUnitsWithAUD++
+		}
+		if hasIDR {
+			d.IDRAccessUnits++
+			if len(auSPSNALs) > 0 {
+				d.IDRWithSPS++
+			}
+			if len(auPPSNALs) > 0 {
+				d.IDRWithPPS++
+			}
+			if len(auSPSNALs) > 0 && len(auPPSNALs) > 0 {
+				d.IDRWithSPSAndPPS++
+			} else {
+				d.IDRMissingSPSOrPPS++
+			}
+		} else if hasNonIDR {
+			d.NonIDRAccessUnits++
+		}
+
+		for _, ppsNAL := range auPPSNALs {
+			ppsHex := hex.EncodeToString(ppsNAL)
+			if lastPPSHex != "" && ppsHex != lastPPSHex {
+				d.PPSChanges++
+			}
+			lastPPSHex = ppsHex
+			latestPPS = annexB(ppsNAL)
+			if !seenPPS[ppsHex] {
+				seenPPS[ppsHex] = true
+				d.PPS = append(d.PPS, PPSOccurrence{AUNumber: auNumber, PTS: au.PTS, DTS: au.DTS, Hex: ppsHex})
+			}
+		}
+
+		for _, spsNAL := range auSPSNALs {
+			spsHex := hex.EncodeToString(spsNAL)
+			if lastSPSHex != "" && spsHex != lastSPSHex {
+				d.SPSChanges++
+			}
+			lastSPSHex = spsHex
+
+			ppsForParse := latestPPS
+			if len(auPPSNALs) > 0 {
+				ppsForParse = annexB(auPPSNALs[len(auPPSNALs)-1])
+			}
+			diagnostic := parseH264SPS(annexB(spsNAL), ppsForParse)
+			if !diagnostic.Valid {
+				d.SPSParseErrors++
+				d.AllSPSParseValid = false
+			}
+			if !seenSPS[spsHex] {
+				seenSPS[spsHex] = true
+				d.SPS = append(d.SPS, SPSOccurrence{AUNumber: auNumber, PTS: au.PTS, DTS: au.DTS, Hex: spsHex, Diagnostics: diagnostic})
+			}
+		}
+	}
+
+	d.UniqueSPS = len(seenSPS)
+	d.UniquePPS = len(seenPPS)
+	d.MultipleSPSInSegment = d.UniqueSPS > 1
+	d.MultiplePPSInSegment = d.UniquePPS > 1
+	d.MultipleCodecConfigurations = d.MultipleSPSInSegment || d.MultiplePPSInSegment
+	d.AllIDRHaveSPSAndPPS = d.IDRAccessUnits > 0 && d.IDRMissingSPSOrPPS == 0
+	d.Success = d.AccessUnits > 0 && d.Error == ""
+	return d
+}
+
 func (s *StreamSession) newSegmentLocked() error {
 	buf := &bytes.Buffer{}
 
@@ -2743,11 +2913,11 @@ func (s *StreamSession) keyframeAccessUnitLocked(
 }
 
 /*
-	V19 prepares every AU immediately before WriteH264.
+V19 prepares every AU immediately before WriteH264.
 
-	This gives the MPEG-TS writer one consistent Annex-B
-	representation regardless of how the RTP depacketizer
-	represented individual NAL units.
+This gives the MPEG-TS writer one consistent Annex-B
+representation regardless of how the RTP depacketizer
+represented individual NAL units.
 */
 func (s *StreamSession) prepareMuxAccessUnitLocked(
 	accessUnit []byte,
@@ -2795,15 +2965,15 @@ func (s *StreamSession) prepareMuxAccessUnitLocked(
 
 	s.lastMuxNALSummary = naluSummary(accessUnit)
 	s.lastMuxBytes = len(accessUnit)
-prefixLength := len(accessUnit)
+	prefixLength := len(accessUnit)
 
-if prefixLength > 32 {
-    prefixLength = 32
-}
+	if prefixLength > 32 {
+		prefixLength = 32
+	}
 
-s.lastMuxPrefixHex = hex.EncodeToString(
-    accessUnit[:prefixLength],
-)
+	s.lastMuxPrefixHex = hex.EncodeToString(
+		accessUnit[:prefixLength],
+	)
 	return accessUnit
 }
 
@@ -3542,92 +3712,63 @@ func health(
 			"validatedTS":      validated,
 			"validationErrors": validationErrors,
 
-			"timestampDiscontinuities":
-				discontinuities,
+			"timestampDiscontinuities": discontinuities,
 
-			"codecChanges":
-				codecChanges,
+			"codecChanges": codecChanges,
 
-			"generation":
-				generation,
+			"generation": generation,
 
-			"duplicateSPSRemoved":
-				duplicateSPS,
+			"duplicateSPSRemoved": duplicateSPS,
 
-			"duplicatePPSRemoved":
-				duplicatePPS,
+			"duplicatePPSRemoved": duplicatePPS,
 
-			"cleanedAccessUnits":
-				cleanedAUs,
+			"cleanedAccessUnits": cleanedAUs,
 
-			"sliceHeadersParsed":
-				sliceHeaders,
+			"sliceHeadersParsed": sliceHeaders,
 
-			"sliceParseErrors":
-				sliceErrors,
+			"sliceParseErrors": sliceErrors,
 
-			"iSlices":
-				iSlices,
+			"iSlices": iSlices,
 
-			"pSlices":
-				pSlices,
+			"pSlices": pSlices,
 
-			"bSlices":
-				bSlices,
+			"bSlices": bSlices,
 
-			"pocBackwardEvents":
-				pocBackward,
+			"pocBackwardEvents": pocBackward,
 
-			"muxAccessUnits":
-				muxAccessUnits,
+			"muxAccessUnits": muxAccessUnits,
 
-			"muxNALUnits":
-				muxNALUnits,
+			"muxNALUnits": muxNALUnits,
 
-			"muxIDRUnits":
-				muxIDRUnits,
+			"muxIDRUnits": muxIDRUnits,
 
-			"annexBRepairs":
-				annexBRepairs,
+			"annexBRepairs": annexBRepairs,
 
-			"lastMuxNALTypes":
-				lastMuxNAL,
+			"lastMuxNALTypes": lastMuxNAL,
 
-			"lastMuxBytes":
-				lastMuxBytes,
+			"lastMuxBytes": lastMuxBytes,
 
-			"frozenVODReady":
-				vodReady,
+			"frozenVODReady": vodReady,
 
-			"frozenVODSegments":
-				vodSegments,
+			"frozenVODSegments": vodSegments,
 
-			"frozenVODDuration":
-				vodDuration,
+			"frozenVODDuration": vodDuration,
 
-			"frozenVODPlaylist":
-				"/vod/index.m3u8",
+			"frozenVODPlaylist": "/vod/index.m3u8",
 
-			"annexBCanonicalization":
-				true,
+			"annexBCanonicalization": true,
 
-			"sliceOrderingDiagnostics":
-				true,
+			"sliceOrderingDiagnostics": true,
 
-			"parameterSetDeduplication":
-				true,
+			"parameterSetDeduplication": true,
 
-			"codecTransitionHandling":
-				true,
+			"codecTransitionHandling": true,
 
-			"hlsDiscontinuity":
-				true,
+			"hlsDiscontinuity": true,
 
-			"timestampOffset":
-				ptsOffset,
+			"timestampOffset": ptsOffset,
 
-			"mediaSelfCheck":
-				true,
+			"mediaSelfCheck": true,
 		},
 	)
 }
@@ -3832,164 +3973,125 @@ func start(
 		w,
 		200,
 		map[string]interface{}{
-			"status":
-				"streaming",
+			"status": "streaming",
 
-			"camera":
-				cameraIndex,
+			"camera": cameraIndex,
 
-			"name":
-				camera.Name,
+			"name": camera.Name,
 
-			"total":
-				len(cameras),
+			"total": len(cameras),
 
-			"hls":
-				"/live/index.m3u8",
+			"hls": "/live/index.m3u8",
 
-			"freeze":
-				"/vod/freeze",
+			"freeze": "/vod/freeze",
 
-			"vod":
-				"/vod/index.m3u8",
+			"vod": "/vod/index.m3u8",
 
-			"version":
-				19,
+			"version": 19,
 
-			"videoPackets":
-				atomic.LoadUint64(
-					&session.Stats.VideoPackets,
-				),
+			"videoPackets": atomic.LoadUint64(
+				&session.Stats.VideoPackets,
+			),
 
-			"accessUnits":
-				atomic.LoadUint64(
-					&session.Stats.AccessUnits,
-				),
+			"accessUnits": atomic.LoadUint64(
+				&session.Stats.AccessUnits,
+			),
 
-			"segments":
-				atomic.LoadUint64(
-					&session.Stats.HLSSegments,
-				),
+			"segments": atomic.LoadUint64(
+				&session.Stats.HLSSegments,
+			),
 
-			"emptyPackets":
-				atomic.LoadUint64(
-					&session.Stats.EmptyPackets,
-				),
+			"emptyPackets": atomic.LoadUint64(
+				&session.Stats.EmptyPackets,
+			),
 
-			"validatedTS":
-				atomic.LoadUint64(
-					&session.Stats.ValidatedTS,
-				),
+			"validatedTS": atomic.LoadUint64(
+				&session.Stats.ValidatedTS,
+			),
 
-			"validationErrors":
-				atomic.LoadUint64(
-					&session.Stats.ValidationError,
-				),
+			"validationErrors": atomic.LoadUint64(
+				&session.Stats.ValidationError,
+			),
 
-			"timestampDiscontinuities":
-				atomic.LoadUint64(
-					&session.Stats.TimestampDiscontinuities,
-				),
+			"timestampDiscontinuities": atomic.LoadUint64(
+				&session.Stats.TimestampDiscontinuities,
+			),
 
-			"codecChanges":
-				atomic.LoadUint64(
-					&session.Stats.CodecChanges,
-				),
+			"codecChanges": atomic.LoadUint64(
+				&session.Stats.CodecChanges,
+			),
 
-			"duplicateSPSRemoved":
-				atomic.LoadUint64(
-					&session.Stats.DuplicateSPSRemoved,
-				),
+			"duplicateSPSRemoved": atomic.LoadUint64(
+				&session.Stats.DuplicateSPSRemoved,
+			),
 
-			"duplicatePPSRemoved":
-				atomic.LoadUint64(
-					&session.Stats.DuplicatePPSRemoved,
-				),
+			"duplicatePPSRemoved": atomic.LoadUint64(
+				&session.Stats.DuplicatePPSRemoved,
+			),
 
-			"cleanedAccessUnits":
-				atomic.LoadUint64(
-					&session.Stats.CleanedAccessUnits,
-				),
+			"cleanedAccessUnits": atomic.LoadUint64(
+				&session.Stats.CleanedAccessUnits,
+			),
 
-			"sliceHeadersParsed":
-				atomic.LoadUint64(
-					&session.Stats.SliceHeadersParsed,
-				),
+			"sliceHeadersParsed": atomic.LoadUint64(
+				&session.Stats.SliceHeadersParsed,
+			),
 
-			"sliceParseErrors":
-				atomic.LoadUint64(
-					&session.Stats.SliceParseErrors,
-				),
+			"sliceParseErrors": atomic.LoadUint64(
+				&session.Stats.SliceParseErrors,
+			),
 
-			"iSlices":
-				atomic.LoadUint64(
-					&session.Stats.ISlices,
-				),
+			"iSlices": atomic.LoadUint64(
+				&session.Stats.ISlices,
+			),
 
-			"pSlices":
-				atomic.LoadUint64(
-					&session.Stats.PSlices,
-				),
+			"pSlices": atomic.LoadUint64(
+				&session.Stats.PSlices,
+			),
 
-			"bSlices":
-				atomic.LoadUint64(
-					&session.Stats.BSlices,
-				),
+			"bSlices": atomic.LoadUint64(
+				&session.Stats.BSlices,
+			),
 
-			"pocBackwardEvents":
-				atomic.LoadUint64(
-					&session.Stats.POCBackwardEvents,
-				),
+			"pocBackwardEvents": atomic.LoadUint64(
+				&session.Stats.POCBackwardEvents,
+			),
 
-			"muxAccessUnits":
-				atomic.LoadUint64(
-					&session.Stats.MuxAccessUnits,
-				),
+			"muxAccessUnits": atomic.LoadUint64(
+				&session.Stats.MuxAccessUnits,
+			),
 
-			"muxNALUnits":
-				atomic.LoadUint64(
-					&session.Stats.MuxNALUnits,
-				),
+			"muxNALUnits": atomic.LoadUint64(
+				&session.Stats.MuxNALUnits,
+			),
 
-			"muxIDRUnits":
-				atomic.LoadUint64(
-					&session.Stats.MuxIDRUnits,
-				),
+			"muxIDRUnits": atomic.LoadUint64(
+				&session.Stats.MuxIDRUnits,
+			),
 
-			"annexBRepairs":
-				atomic.LoadUint64(
-					&session.Stats.AnnexBRepairs,
-				),
+			"annexBRepairs": atomic.LoadUint64(
+				&session.Stats.AnnexBRepairs,
+			),
 
-			"generation":
-				generation,
+			"generation": generation,
 
-			"lastOriginalNALTypes":
-				lastOriginal,
+			"lastOriginalNALTypes": lastOriginal,
 
-			"lastCleanedNALTypes":
-				lastCleaned,
+			"lastCleanedNALTypes": lastCleaned,
 
-			"lastMuxNALTypes":
-				lastMuxNAL,
+			"lastMuxNALTypes": lastMuxNAL,
 
-			"lastMuxBytes":
-				lastMuxBytes,
+			"lastMuxBytes": lastMuxBytes,
 
-			"lastDiagnostic":
-				diagnostic,
+			"lastDiagnostic": diagnostic,
 
-			"h264Diagnostic":
-				h264Diagnostic,
+			"h264Diagnostic": h264Diagnostic,
 
-			"sliceDiagnostic":
-				sliceDiagnostic,
+			"sliceDiagnostic": sliceDiagnostic,
 
-			"codecTransitions":
-				"/debug/h264",
+			"codecTransitions": "/debug/h264",
 
-			"muxDiagnostics":
-				"/debug/mux",
+			"muxDiagnostics": "/debug/mux",
 		},
 	)
 }
@@ -4079,198 +4181,149 @@ func statusHandler(
 			"streaming": true,
 			"version":   19,
 
-			"camera":
-				session.Index,
+			"camera": session.Index,
 
-			"name":
-				session.Camera.Name,
+			"name": session.Camera.Name,
 
-			"videoPackets":
-				atomic.LoadUint64(
-					&session.Stats.VideoPackets,
-				),
+			"videoPackets": atomic.LoadUint64(
+				&session.Stats.VideoPackets,
+			),
 
-			"videoBytes":
-				atomic.LoadUint64(
-					&session.Stats.VideoBytes,
-				),
+			"videoBytes": atomic.LoadUint64(
+				&session.Stats.VideoBytes,
+			),
 
-			"accessUnits":
-				atomic.LoadUint64(
-					&session.Stats.AccessUnits,
-				),
+			"accessUnits": atomic.LoadUint64(
+				&session.Stats.AccessUnits,
+			),
 
-			"segments":
-				atomic.LoadUint64(
-					&session.Stats.HLSSegments,
-				),
+			"segments": atomic.LoadUint64(
+				&session.Stats.HLSSegments,
+			),
 
-			"audioPackets":
-				atomic.LoadUint64(
-					&session.Stats.AudioPackets,
-				),
+			"audioPackets": atomic.LoadUint64(
+				&session.Stats.AudioPackets,
+			),
 
-			"emptyPackets":
-				atomic.LoadUint64(
-					&session.Stats.EmptyPackets,
-				),
+			"emptyPackets": atomic.LoadUint64(
+				&session.Stats.EmptyPackets,
+			),
 
-			"validatedTS":
-				atomic.LoadUint64(
-					&session.Stats.ValidatedTS,
-				),
+			"validatedTS": atomic.LoadUint64(
+				&session.Stats.ValidatedTS,
+			),
 
-			"validationErrors":
-				atomic.LoadUint64(
-					&session.Stats.ValidationError,
-				),
+			"validationErrors": atomic.LoadUint64(
+				&session.Stats.ValidationError,
+			),
 
-			"timestampDiscontinuities":
-				atomic.LoadUint64(
-					&session.Stats.TimestampDiscontinuities,
-				),
+			"timestampDiscontinuities": atomic.LoadUint64(
+				&session.Stats.TimestampDiscontinuities,
+			),
 
-			"codecChanges":
-				atomic.LoadUint64(
-					&session.Stats.CodecChanges,
-				),
+			"codecChanges": atomic.LoadUint64(
+				&session.Stats.CodecChanges,
+			),
 
-			"duplicateSPSRemoved":
-				atomic.LoadUint64(
-					&session.Stats.DuplicateSPSRemoved,
-				),
+			"duplicateSPSRemoved": atomic.LoadUint64(
+				&session.Stats.DuplicateSPSRemoved,
+			),
 
-			"duplicatePPSRemoved":
-				atomic.LoadUint64(
-					&session.Stats.DuplicatePPSRemoved,
-				),
+			"duplicatePPSRemoved": atomic.LoadUint64(
+				&session.Stats.DuplicatePPSRemoved,
+			),
 
-			"cleanedAccessUnits":
-				atomic.LoadUint64(
-					&session.Stats.CleanedAccessUnits,
-				),
+			"cleanedAccessUnits": atomic.LoadUint64(
+				&session.Stats.CleanedAccessUnits,
+			),
 
-			"sliceHeadersParsed":
-				atomic.LoadUint64(
-					&session.Stats.SliceHeadersParsed,
-				),
+			"sliceHeadersParsed": atomic.LoadUint64(
+				&session.Stats.SliceHeadersParsed,
+			),
 
-			"sliceParseErrors":
-				atomic.LoadUint64(
-					&session.Stats.SliceParseErrors,
-				),
+			"sliceParseErrors": atomic.LoadUint64(
+				&session.Stats.SliceParseErrors,
+			),
 
-			"iSlices":
-				atomic.LoadUint64(
-					&session.Stats.ISlices,
-				),
+			"iSlices": atomic.LoadUint64(
+				&session.Stats.ISlices,
+			),
 
-			"pSlices":
-				atomic.LoadUint64(
-					&session.Stats.PSlices,
-				),
+			"pSlices": atomic.LoadUint64(
+				&session.Stats.PSlices,
+			),
 
-			"bSlices":
-				atomic.LoadUint64(
-					&session.Stats.BSlices,
-				),
+			"bSlices": atomic.LoadUint64(
+				&session.Stats.BSlices,
+			),
 
-			"pocBackwardEvents":
-				atomic.LoadUint64(
-					&session.Stats.POCBackwardEvents,
-				),
+			"pocBackwardEvents": atomic.LoadUint64(
+				&session.Stats.POCBackwardEvents,
+			),
 
-			"muxAccessUnits":
-				atomic.LoadUint64(
-					&session.Stats.MuxAccessUnits,
-				),
+			"muxAccessUnits": atomic.LoadUint64(
+				&session.Stats.MuxAccessUnits,
+			),
 
-			"muxNALUnits":
-				atomic.LoadUint64(
-					&session.Stats.MuxNALUnits,
-				),
+			"muxNALUnits": atomic.LoadUint64(
+				&session.Stats.MuxNALUnits,
+			),
 
-			"muxIDRUnits":
-				atomic.LoadUint64(
-					&session.Stats.MuxIDRUnits,
-				),
+			"muxIDRUnits": atomic.LoadUint64(
+				&session.Stats.MuxIDRUnits,
+			),
 
-			"annexBRepairs":
-				atomic.LoadUint64(
-					&session.Stats.AnnexBRepairs,
-				),
+			"annexBRepairs": atomic.LoadUint64(
+				&session.Stats.AnnexBRepairs,
+			),
 
-			"sps":
-				hasSPS,
+			"sps": hasSPS,
 
-			"pps":
-				hasPPS,
+			"pps": hasPPS,
 
-			"normalizedPTS":
-				pts,
+			"normalizedPTS": pts,
 
-			"lastNALTypes":
-				nalSummary,
+			"lastNALTypes": nalSummary,
 
-			"lastCleanedNALTypes":
-				cleanedNALSummary,
+			"lastCleanedNALTypes": cleanedNALSummary,
 
-			"lastMuxNALTypes":
-				lastMuxNAL,
+			"lastMuxNALTypes": lastMuxNAL,
 
-			"lastMuxBytes":
-				lastMuxBytes,
+			"lastMuxBytes": lastMuxBytes,
 
-			"lastMuxPrefixHex":
-				lastMuxPrefix,
+			"lastMuxPrefixHex": lastMuxPrefix,
 
-			"h264":
-				h264,
+			"h264": h264,
 
-			"slice":
-				slice,
+			"slice": slice,
 
-			"activeCodec":
-				activeCodec,
+			"activeCodec": activeCodec,
 
-			"generation":
-				generation,
+			"generation": generation,
 
-			"pendingDiscontinuity":
-				pendingDiscontinuity,
+			"pendingDiscontinuity": pendingDiscontinuity,
 
-			"codecHistory":
-				changes,
+			"codecHistory": changes,
 
-			"lastSegment":
-				lastSegment,
+			"lastSegment": lastSegment,
 
-			"frozenVODReady":
-				vodReady,
+			"frozenVODReady": vodReady,
 
-			"frozenVODCreatedAt":
-				vodCreated,
+			"frozenVODCreatedAt": vodCreated,
 
-			"frozenVODSegments":
-				vodSegments,
+			"frozenVODSegments": vodSegments,
 
-			"frozenVODDuration":
-				vodDuration,
+			"frozenVODDuration": vodDuration,
 
-			"frozenVODGeneration":
-				vodGeneration,
+			"frozenVODGeneration": vodGeneration,
 
-			"frozenVODCodec":
-				vodCodec,
+			"frozenVODCodec": vodCodec,
 
-			"frozenVODPlaylist":
-				"/vod/index.m3u8",
+			"frozenVODPlaylist": "/vod/index.m3u8",
 
-			"codecTransitions":
-				"/debug/h264",
+			"codecTransitions": "/debug/h264",
 
-			"muxDiagnostics":
-				"/debug/mux",
+			"muxDiagnostics": "/debug/mux",
 		},
 	)
 }
@@ -4310,52 +4363,39 @@ func muxDiagnosticsHandler(
 		map[string]interface{}{
 			"version": 19,
 
-			"camera":
-				session.Index,
+			"camera": session.Index,
 
-			"name":
-				session.Camera.Name,
+			"name": session.Camera.Name,
 
-			"originalNALTypes":
-				lastOriginal,
+			"originalNALTypes": lastOriginal,
 
-			"cleanedNALTypes":
-				lastCleaned,
+			"cleanedNALTypes": lastCleaned,
 
-			"muxNALTypes":
-				lastMuxNAL,
+			"muxNALTypes": lastMuxNAL,
 
-			"muxBytes":
-				lastMuxBytes,
+			"muxBytes": lastMuxBytes,
 
-			"muxPrefixHex":
-				lastMuxPrefix,
+			"muxPrefixHex": lastMuxPrefix,
 
-			"muxAccessUnits":
-				atomic.LoadUint64(
-					&session.Stats.MuxAccessUnits,
-				),
+			"muxAccessUnits": atomic.LoadUint64(
+				&session.Stats.MuxAccessUnits,
+			),
 
-			"muxNALUnits":
-				atomic.LoadUint64(
-					&session.Stats.MuxNALUnits,
-				),
+			"muxNALUnits": atomic.LoadUint64(
+				&session.Stats.MuxNALUnits,
+			),
 
-			"muxIDRUnits":
-				atomic.LoadUint64(
-					&session.Stats.MuxIDRUnits,
-				),
+			"muxIDRUnits": atomic.LoadUint64(
+				&session.Stats.MuxIDRUnits,
+			),
 
-			"annexBRepairs":
-				atomic.LoadUint64(
-					&session.Stats.AnnexBRepairs,
-				),
+			"annexBRepairs": atomic.LoadUint64(
+				&session.Stats.AnnexBRepairs,
+			),
 
-			"expectedFormat":
-				"Annex-B H264 access units with 00 00 00 01 start codes",
+			"expectedFormat": "Annex-B H264 access units with 00 00 00 01 start codes",
 
-			"test":
-				"verify exact H264 access unit presented to MPEG-TS muxer",
+			"test": "verify exact H264 access unit presented to MPEG-TS muxer",
 		},
 	)
 }
@@ -4371,7 +4411,7 @@ func readbackDebugHandler(
 			http.StatusNotFound,
 			map[string]interface{}{
 				"error":   "no active stream",
-				"version": 20,
+				"version": 21,
 			},
 		)
 		return
@@ -4387,7 +4427,7 @@ func readbackDebugHandler(
 			http.StatusNotFound,
 			map[string]interface{}{
 				"error":   "no completed TS segments",
-				"version": 20,
+				"version": 21,
 			},
 		)
 		return
@@ -4400,17 +4440,19 @@ func readbackDebugHandler(
 	session.mu.RUnlock()
 
 	diagnostics := readbackTS(segment.Data)
+	compatibility := analyzeReadbackH264(segment.Data)
 
 	writeJSON(
 		w,
 		http.StatusOK,
 		map[string]interface{}{
-			"version":     20,
-			"sequence":    segment.Sequence,
-			"generation":  segment.Generation,
-			"duration":    segment.Duration,
-			"bytes":       len(segment.Data),
-			"diagnostics": diagnostics,
+			"version":           21,
+			"sequence":          segment.Sequence,
+			"generation":        segment.Generation,
+			"duration":          segment.Duration,
+			"bytes":             len(segment.Data),
+			"diagnostics":       diagnostics,
+			"h264Compatibility": compatibility,
 		},
 	)
 }
@@ -4514,91 +4556,69 @@ func h264DebugHandler(
 		map[string]interface{}{
 			"version": 19,
 
-			"camera":
-				session.Index,
+			"camera": session.Index,
 
-			"name":
-				session.Camera.Name,
+			"name": session.Camera.Name,
 
-			"h264":
-				h264,
+			"h264": h264,
 
-			"slice":
-				slice,
+			"slice": slice,
 
-			"activeCodec":
-				activeCodec,
+			"activeCodec": activeCodec,
 
-			"generation":
-				generation,
+			"generation": generation,
 
-			"codecChanges":
-				changes,
+			"codecChanges": changes,
 
-			"lastNALTypes":
-				lastNAL,
+			"lastNALTypes": lastNAL,
 
-			"lastCleanedNALTypes":
-				lastCleaned,
+			"lastCleanedNALTypes": lastCleaned,
 
-			"lastMuxNALTypes":
-				lastMux,
+			"lastMuxNALTypes": lastMux,
 
-			"lastMuxBytes":
-				lastMuxBytes,
+			"lastMuxBytes": lastMuxBytes,
 
-			"lastMuxPrefixHex":
-				lastMuxPrefix,
+			"lastMuxPrefixHex": lastMuxPrefix,
 
-			"duplicateSPSRemoved":
-				atomic.LoadUint64(
-					&session.Stats.DuplicateSPSRemoved,
-				),
+			"duplicateSPSRemoved": atomic.LoadUint64(
+				&session.Stats.DuplicateSPSRemoved,
+			),
 
-			"duplicatePPSRemoved":
-				atomic.LoadUint64(
-					&session.Stats.DuplicatePPSRemoved,
-				),
+			"duplicatePPSRemoved": atomic.LoadUint64(
+				&session.Stats.DuplicatePPSRemoved,
+			),
 
-			"cleanedAccessUnits":
-				atomic.LoadUint64(
-					&session.Stats.CleanedAccessUnits,
-				),
+			"cleanedAccessUnits": atomic.LoadUint64(
+				&session.Stats.CleanedAccessUnits,
+			),
 
-			"sliceHeadersParsed":
-				atomic.LoadUint64(
-					&session.Stats.SliceHeadersParsed,
-				),
+			"sliceHeadersParsed": atomic.LoadUint64(
+				&session.Stats.SliceHeadersParsed,
+			),
 
-			"sliceParseErrors":
-				atomic.LoadUint64(
-					&session.Stats.SliceParseErrors,
-				),
+			"sliceParseErrors": atomic.LoadUint64(
+				&session.Stats.SliceParseErrors,
+			),
 
-			"iSlices":
-				atomic.LoadUint64(
-					&session.Stats.ISlices,
-				),
+			"iSlices": atomic.LoadUint64(
+				&session.Stats.ISlices,
+			),
 
-			"pSlices":
-				atomic.LoadUint64(
-					&session.Stats.PSlices,
-				),
+			"pSlices": atomic.LoadUint64(
+				&session.Stats.PSlices,
+			),
 
-			"bSlices":
-				atomic.LoadUint64(
-					&session.Stats.BSlices,
-				),
+			"bSlices": atomic.LoadUint64(
+				&session.Stats.BSlices,
+			),
 
-			"pocBackwardEvents":
-				atomic.LoadUint64(
-					&session.Stats.POCBackwardEvents,
-				),
+			"pocBackwardEvents": atomic.LoadUint64(
+				&session.Stats.POCBackwardEvents,
+			),
 
-			"annexBRepairs":
-				atomic.LoadUint64(
-					&session.Stats.AnnexBRepairs,
-				),
+			"annexBRepairs": atomic.LoadUint64(
+				&session.Stats.AnnexBRepairs,
+			),
 		},
 	)
 }
@@ -4849,32 +4869,23 @@ func freezeVODHandler(
 		w,
 		http.StatusOK,
 		map[string]interface{}{
-			"status":
-				"frozen",
+			"status": "frozen",
 
-			"version":
-				19,
+			"version": 19,
 
-			"camera":
-				camera,
+			"camera": camera,
 
-			"name":
-				name,
+			"name": name,
 
-			"segments":
-				segments,
+			"segments": segments,
 
-			"duration":
-				duration,
+			"duration": duration,
 
-			"generation":
-				generation,
+			"generation": generation,
 
-			"codec":
-				codec,
+			"codec": codec,
 
-			"playlist":
-				"/vod/index.m3u8",
+			"playlist": "/vod/index.m3u8",
 		},
 	)
 }
@@ -4890,35 +4901,25 @@ func vodStatusHandler(
 		w,
 		http.StatusOK,
 		map[string]interface{}{
-			"version":
-				19,
+			"version": 19,
 
-			"ready":
-				frozenVOD.Ready,
+			"ready": frozenVOD.Ready,
 
-			"createdAt":
-				frozenVOD.CreatedAt,
+			"createdAt": frozenVOD.CreatedAt,
 
-			"camera":
-				frozenVOD.CameraIndex,
+			"camera": frozenVOD.CameraIndex,
 
-			"name":
-				frozenVOD.CameraName,
+			"name": frozenVOD.CameraName,
 
-			"segments":
-				len(frozenVOD.Segments),
+			"segments": len(frozenVOD.Segments),
 
-			"duration":
-				frozenVOD.TotalDuration,
+			"duration": frozenVOD.TotalDuration,
 
-			"generation":
-				frozenVOD.Generation,
+			"generation": frozenVOD.Generation,
 
-			"codec":
-				frozenVOD.Codec,
+			"codec": frozenVOD.Codec,
 
-			"playlist":
-				"/vod/index.m3u8",
+			"playlist": "/vod/index.m3u8",
 		},
 	)
 }
@@ -5125,47 +5126,33 @@ func rootHandler(
 		w,
 		http.StatusOK,
 		map[string]interface{}{
-			"name":
-				"NestView Roku Pion Bridge",
+			"name": "NestView Roku Pion Bridge",
 
-			"status":
-				"online",
+			"status": "online",
 
-			"version":
-				19,
+			"version": 19,
 
-			"media":
-				"H264 -> MPEG-TS -> HLS",
+			"media": "H264 -> MPEG-TS -> HLS",
 
-			"v19":
-				"Annex-B mux-input diagnostics",
+			"v19": "Annex-B mux-input diagnostics",
 
-			"start":
-				"POST /start",
+			"start": "POST /start",
 
-			"statusEndpoint":
-				"/status",
+			"statusEndpoint": "/status",
 
-			"livePlaylist":
-				"/live/index.m3u8",
+			"livePlaylist": "/live/index.m3u8",
 
-			"freezeVOD":
-				"/vod/freeze",
+			"freezeVOD": "/vod/freeze",
 
-			"vodPlaylist":
-				"/vod/index.m3u8",
+			"vodPlaylist": "/vod/index.m3u8",
 
-			"vodStatus":
-				"/vod/status",
+			"vodStatus": "/vod/status",
 
-			"tsDiagnostics":
-				"/debug/ts",
+			"tsDiagnostics": "/debug/ts",
 
-			"h264Diagnostics":
-				"/debug/h264",
+			"h264Diagnostics": "/debug/h264",
 
-			"muxDiagnostics":
-				"/debug/mux",
+			"muxDiagnostics": "/debug/mux",
 		},
 	)
 }
@@ -5214,9 +5201,9 @@ func main() {
 		muxDiagnosticsHandler,
 	)
 	http.HandleFunc(
-    "/debug/readback",
-    readbackDebugHandler,
-)
+		"/debug/readback",
+		readbackDebugHandler,
+	)
 
 	http.HandleFunc(
 		"/live/index.m3u8",
