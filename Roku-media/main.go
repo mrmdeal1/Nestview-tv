@@ -5515,8 +5515,8 @@ func liveMasterPlaylistHandler(
 	// resolution generation changes are safe even though they are not known when
 	// this finite Apple shell is first generated.
 	inLines := strings.Split(string(childBody), "\n")
-	outLines := make([]string, 0, len(inLines)+mediaIndex)
 	mediaIndex := 0
+	outLines := make([]string, 0, len(inLines)+32)
 	for _, line := range inLines {
 		t := strings.TrimSpace(line)
 		if t == "" || strings.HasPrefix(t, "#") {
