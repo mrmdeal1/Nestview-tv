@@ -182,7 +182,27 @@ type H264Diagnostics struct {
 	DisplayWidth  int `json:"displayWidth"`
 	DisplayHeight int `json:"displayHeight"`
 
-	VUIParametersPresent bool `json:"vuiParametersPresent"`
+	VUIParametersPresent     bool    `json:"vuiParametersPresent"`
+	AspectRatioInfoPresent   bool    `json:"aspectRatioInfoPresent"`
+	AspectRatioIDC           uint64  `json:"aspectRatioIDC"`
+	SARWidth                 uint64  `json:"sarWidth"`
+	SARHeight                uint64  `json:"sarHeight"`
+	VideoSignalTypePresent   bool    `json:"videoSignalTypePresent"`
+	VideoFormat              uint64  `json:"videoFormat"`
+	VideoFullRange           bool    `json:"videoFullRange"`
+	ColourDescriptionPresent bool    `json:"colourDescriptionPresent"`
+	ColourPrimaries          uint64  `json:"colourPrimaries"`
+	TransferCharacteristics  uint64  `json:"transferCharacteristics"`
+	MatrixCoefficients       uint64  `json:"matrixCoefficients"`
+	TimingInfoPresent        bool    `json:"timingInfoPresent"`
+	NumUnitsInTick           uint64  `json:"numUnitsInTick"`
+	TimeScale                uint64  `json:"timeScale"`
+	FixedFrameRate           bool    `json:"fixedFrameRate"`
+	NominalFrameRate         float64 `json:"nominalFrameRate"`
+	BitstreamRestriction     bool    `json:"bitstreamRestriction"`
+	MaxNumReorderFrames      uint64  `json:"maxNumReorderFrames"`
+	MaxDecFrameBuffering     uint64  `json:"maxDecFrameBuffering"`
+	VUIParseError            string  `json:"vuiParseError,omitempty"`
 
 	SPSBytes int `json:"spsBytes"`
 	PPSBytes int `json:"ppsBytes"`
@@ -444,7 +464,7 @@ func buildFrozenVOD(session *StreamSession) (int, float64) {
 	frozenVOD.mu.Unlock()
 
 	log.Printf(
-		"VERSION 19 FROZEN VOD READY: camera=%d name=%s generation=%d segments=%d duration=%.3f codec=[%s]",
+		"VERSION 22 FROZEN VOD READY: camera=%d name=%s generation=%d segments=%d duration=%.3f codec=[%s]",
 		cameraIndex,
 		cameraName,
 		generation,
@@ -1356,7 +1376,7 @@ func (s *StreamSession) inspectSliceOrderingLocked(
 			s.h264SliceDiagnostics = diagnostic
 
 			log.Printf(
-				"VERSION 19 H264 SLICE PARSE ERROR: NAL=%d PTS=%d error=%s",
+				"VERSION 22 H264 SLICE PARSE ERROR: NAL=%d PTS=%d error=%s",
 				nalType,
 				pts,
 				diagnostic.Error,
@@ -1424,7 +1444,7 @@ func (s *StreamSession) inspectSliceOrderingLocked(
 			diagnostic.POCBackward {
 
 			log.Printf(
-				"VERSION 19 H264 REORDER SIGNAL: slice=%s frameNum=%d POC=%d previousPOC=%d POCBackward=%t IDR=%t PTS=%d",
+				"VERSION 22 H264 REORDER SIGNAL: slice=%s frameNum=%d POC=%d previousPOC=%d POCBackward=%t IDR=%t PTS=%d",
 				diagnostic.SliceType,
 				diagnostic.FrameNum,
 				diagnostic.PicOrderCntLSB,
@@ -1488,6 +1508,204 @@ func codecSignatureString(
 		c.BitDepthChroma,
 	)
 }
+func readBitsValue(b *bitReader, count int) (uint64, error) {
+	var value uint64
+	for i := 0; i < count; i++ {
+		bit, err := b.readBit()
+		if err != nil {
+			return 0, err
+		}
+		value = (value << 1) | bit
+	}
+	return value, nil
+}
+
+func skipH264HRD(b *bitReader) error {
+	cpbCntMinus1, err := b.readUE()
+	if err != nil {
+		return err
+	}
+	if _, err = readBitsValue(b, 4); err != nil {
+		return err
+	}
+	if _, err = readBitsValue(b, 4); err != nil {
+		return err
+	}
+	for i := uint64(0); i <= cpbCntMinus1; i++ {
+		if _, err = b.readUE(); err != nil {
+			return err
+		}
+		if _, err = b.readUE(); err != nil {
+			return err
+		}
+		if _, err = b.readBit(); err != nil {
+			return err
+		}
+	}
+	for i := 0; i < 4; i++ {
+		if _, err = readBitsValue(b, 5); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func parseH264VUI(b *bitReader, d *H264Diagnostics) error {
+	flag, err := b.readBit()
+	if err != nil {
+		return err
+	}
+	d.AspectRatioInfoPresent = flag != 0
+	if flag != 0 {
+		idc, err := readBitsValue(b, 8)
+		if err != nil {
+			return err
+		}
+		d.AspectRatioIDC = idc
+		if idc == 255 {
+			w, err := readBitsValue(b, 16)
+			if err != nil {
+				return err
+			}
+			h, err := readBitsValue(b, 16)
+			if err != nil {
+				return err
+			}
+			d.SARWidth, d.SARHeight = w, h
+		}
+	}
+	flag, err = b.readBit()
+	if err != nil {
+		return err
+	}
+	if flag != 0 {
+		if _, err = b.readBit(); err != nil {
+			return err
+		}
+	}
+	flag, err = b.readBit()
+	if err != nil {
+		return err
+	}
+	d.VideoSignalTypePresent = flag != 0
+	if flag != 0 {
+		v, err := readBitsValue(b, 3)
+		if err != nil {
+			return err
+		}
+		d.VideoFormat = v
+		full, err := b.readBit()
+		if err != nil {
+			return err
+		}
+		d.VideoFullRange = full != 0
+		colour, err := b.readBit()
+		if err != nil {
+			return err
+		}
+		d.ColourDescriptionPresent = colour != 0
+		if colour != 0 {
+			d.ColourPrimaries, err = readBitsValue(b, 8)
+			if err != nil {
+				return err
+			}
+			d.TransferCharacteristics, err = readBitsValue(b, 8)
+			if err != nil {
+				return err
+			}
+			d.MatrixCoefficients, err = readBitsValue(b, 8)
+			if err != nil {
+				return err
+			}
+		}
+	}
+	flag, err = b.readBit()
+	if err != nil {
+		return err
+	}
+	if flag != 0 {
+		if _, err = b.readUE(); err != nil {
+			return err
+		}
+		if _, err = b.readUE(); err != nil {
+			return err
+		}
+	}
+	flag, err = b.readBit()
+	if err != nil {
+		return err
+	}
+	d.TimingInfoPresent = flag != 0
+	if flag != 0 {
+		d.NumUnitsInTick, err = readBitsValue(b, 32)
+		if err != nil {
+			return err
+		}
+		d.TimeScale, err = readBitsValue(b, 32)
+		if err != nil {
+			return err
+		}
+		fixed, err := b.readBit()
+		if err != nil {
+			return err
+		}
+		d.FixedFrameRate = fixed != 0
+		if d.NumUnitsInTick != 0 {
+			d.NominalFrameRate = float64(d.TimeScale) / (2.0 * float64(d.NumUnitsInTick))
+		}
+	}
+	nalHRD, err := b.readBit()
+	if err != nil {
+		return err
+	}
+	if nalHRD != 0 {
+		if err = skipH264HRD(b); err != nil {
+			return err
+		}
+	}
+	vclHRD, err := b.readBit()
+	if err != nil {
+		return err
+	}
+	if vclHRD != 0 {
+		if err = skipH264HRD(b); err != nil {
+			return err
+		}
+	}
+	if nalHRD != 0 || vclHRD != 0 {
+		if _, err = b.readBit(); err != nil {
+			return err
+		}
+	}
+	if _, err = b.readBit(); err != nil {
+		return err
+	}
+	flag, err = b.readBit()
+	if err != nil {
+		return err
+	}
+	d.BitstreamRestriction = flag != 0
+	if flag != 0 {
+		if _, err = b.readBit(); err != nil {
+			return err
+		}
+		for i := 0; i < 4; i++ {
+			if _, err = b.readUE(); err != nil {
+				return err
+			}
+		}
+		d.MaxNumReorderFrames, err = b.readUE()
+		if err != nil {
+			return err
+		}
+		d.MaxDecFrameBuffering, err = b.readUE()
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func parseH264SPS(
 	spsAnnexB []byte,
 	ppsAnnexB []byte,
@@ -1804,6 +2022,11 @@ func parseH264SPS(
 
 	if err == nil {
 		d.VUIParametersPresent = vuiPresent != 0
+		if d.VUIParametersPresent {
+			if vuiErr := parseH264VUI(b, &d); vuiErr != nil {
+				d.VUIParseError = vuiErr.Error()
+			}
+		}
 	}
 
 	frameHeightMultiplier := 2
@@ -1888,7 +2111,7 @@ func (s *StreamSession) updateH264DiagnosticsLocked(
 	if !diagnostics.Valid {
 		if hasSPS {
 			log.Printf(
-				"VERSION 19 H264 SPS PARSE ERROR: %s",
+				"VERSION 22 H264 SPS PARSE ERROR: %s",
 				diagnostics.Error,
 			)
 		}
@@ -1904,7 +2127,7 @@ func (s *StreamSession) updateH264DiagnosticsLocked(
 		s.currentGeneration = 0
 
 		log.Printf(
-			"VERSION 19 H264 INITIAL CODEC: %s profileName=%s levelName=%s SPS=%d PPS=%d IDR=%t PTS=%d",
+			"VERSION 22 H264 INITIAL CODEC: %s profileName=%s levelName=%s SPS=%d PPS=%d IDR=%t PTS=%d",
 			codecSignatureString(signature),
 			diagnostics.Profile,
 			diagnostics.Level,
@@ -1921,7 +2144,7 @@ func (s *StreamSession) updateH264DiagnosticsLocked(
 	if sameCodecSignature(s.activeCodec, signature) {
 		if !s.h264Logged {
 			log.Printf(
-				"VERSION 19 H264 CODEC: %s",
+				"VERSION 22 H264 CODEC: %s",
 				codecSignatureString(signature),
 			)
 
@@ -1939,7 +2162,7 @@ func (s *StreamSession) updateH264DiagnosticsLocked(
 	)
 
 	log.Printf(
-		"VERSION 19 CODEC CHANGE DETECTED #%d: FROM [%s] TO [%s] IDR=%t PTS=%d",
+		"VERSION 22 CODEC CHANGE DETECTED #%d: FROM [%s] TO [%s] IDR=%t PTS=%d",
 		changeNumber,
 		codecSignatureString(oldCodec),
 		codecSignatureString(signature),
@@ -1952,7 +2175,7 @@ func (s *StreamSession) updateH264DiagnosticsLocked(
 		s.currentBuffer.Len() > 0 {
 
 		log.Printf(
-			"VERSION 19 closing old codec segment before SPS transition: sequence=%d generation=%d",
+			"VERSION 22 closing old codec segment before SPS transition: sequence=%d generation=%d",
 			s.NextSequence,
 			s.currentGeneration,
 		)
@@ -1990,7 +2213,7 @@ func (s *StreamSession) updateH264DiagnosticsLocked(
 	}
 
 	log.Printf(
-		"VERSION 19 HLS DISCONTINUITY ARMED: generation=%d nextSequence=%d",
+		"VERSION 22 HLS DISCONTINUITY ARMED: generation=%d nextSequence=%d",
 		s.currentGeneration,
 		s.NextSequence,
 	)
@@ -2008,7 +2231,7 @@ func (s *StreamSession) cacheParametersLocked(
 		s.sps = append([]byte(nil), newSPS...)
 
 		log.Printf(
-			"VERSION 19 cached SPS: %d bytes",
+			"VERSION 22 cached SPS: %d bytes",
 			len(s.sps),
 		)
 	}
@@ -2020,7 +2243,7 @@ func (s *StreamSession) cacheParametersLocked(
 		s.pps = append([]byte(nil), newPPS...)
 
 		log.Printf(
-			"VERSION 19 cached PPS: %d bytes",
+			"VERSION 22 cached PPS: %d bytes",
 			len(s.pps),
 		)
 	}
@@ -2038,7 +2261,7 @@ func (s *StreamSession) normalizeTimestamp(
 		s.normalizedPTS = ptsOffset
 
 		log.Printf(
-			"VERSION 19 timestamp clock started: RTP=%d PTS=%d",
+			"VERSION 22 timestamp clock started: RTP=%d PTS=%d",
 			rtpTimestamp,
 			s.normalizedPTS,
 		)
@@ -2055,7 +2278,7 @@ func (s *StreamSession) normalizeTimestamp(
 		)
 
 		log.Printf(
-			"VERSION 19 timestamp discontinuity: previous=%d current=%d rawDelta=%d",
+			"VERSION 22 timestamp discontinuity: previous=%d current=%d rawDelta=%d",
 			s.lastRTPTimestamp,
 			rtpTimestamp,
 			delta,
@@ -2671,7 +2894,7 @@ func (s *StreamSession) newSegmentLocked() error {
 	}
 
 	log.Printf(
-		"VERSION 19 SEGMENT OPEN: sequence=%d generation=%d codec=[%s] discontinuity=%t",
+		"VERSION 22 SEGMENT OPEN: sequence=%d generation=%d codec=[%s] discontinuity=%t",
 		s.NextSequence,
 		s.currentGeneration,
 		codecSignatureString(s.currentSegmentCodec),
@@ -2726,7 +2949,7 @@ func (s *StreamSession) finishSegmentLocked() {
 		)
 
 		log.Printf(
-			"VERSION 19 TS MEDIA VALID: packets=%d bytes=%d PAT=%d PMT=%d videoPID=%d streamType=0x%02x PES=%d PTS=%d DTS=%d PCR=%d continuityErrors=%d firstPTS=%d lastPTS=%d",
+			"VERSION 22 TS MEDIA VALID: packets=%d bytes=%d PAT=%d PMT=%d videoPID=%d streamType=0x%02x PES=%d PTS=%d DTS=%d PCR=%d continuityErrors=%d firstPTS=%d lastPTS=%d",
 			diagnostics.Packets,
 			diagnostics.Bytes,
 			diagnostics.PATPackets,
@@ -2748,7 +2971,7 @@ func (s *StreamSession) finishSegmentLocked() {
 		)
 
 		log.Printf(
-			"VERSION 19 TS MEDIA INVALID: error=%s packets=%d PAT=%d PMT=%d videoPID=%d streamType=0x%02x PES=%d PTS=%d backwardPTS=%d PCR=%d continuityErrors=%d transportErrors=%d",
+			"VERSION 22 TS MEDIA INVALID: error=%s packets=%d PAT=%d PMT=%d videoPID=%d streamType=0x%02x PES=%d PTS=%d backwardPTS=%d PCR=%d continuityErrors=%d transportErrors=%d",
 			validateErr,
 			diagnostics.Packets,
 			diagnostics.PATPackets,
@@ -2804,7 +3027,7 @@ func (s *StreamSession) finishSegmentLocked() {
 	)
 
 	log.Printf(
-		"VERSION 19 HLS SEGMENT READY: sequence=%d generation=%d duration=%.3f size=%d mediaValid=%t discontinuityBefore=%t codec=[%s]",
+		"VERSION 22 HLS SEGMENT READY: sequence=%d generation=%d duration=%.3f size=%d mediaValid=%t discontinuityBefore=%t codec=[%s]",
 		segment.Sequence,
 		segment.Generation,
 		segment.Duration,
@@ -2901,7 +3124,7 @@ func (s *StreamSession) keyframeAccessUnitLocked(
 
 	if changed {
 		log.Printf(
-			"VERSION 19 H264 NORMALIZE: before=%s after=%s removedSPS=%d removedPPS=%d",
+			"VERSION 22 H264 NORMALIZE: before=%s after=%s removedSPS=%d removedPPS=%d",
 			before,
 			after,
 			duplicateSPS,
@@ -3018,7 +3241,7 @@ func (s *StreamSession) writeAccessUnit(
 		}
 
 		log.Printf(
-			"VERSION 19 HLS started on IDR: generation=%d SPS=%t PPS=%t PTS=%d NAL=%s codec=[%s]",
+			"VERSION 22 HLS started on IDR: generation=%d SPS=%t PPS=%t PTS=%d NAL=%s codec=[%s]",
 			s.currentGeneration,
 			len(s.sps) > 0,
 			len(s.pps) > 0,
@@ -3040,7 +3263,7 @@ func (s *StreamSession) writeAccessUnit(
 		}
 
 		log.Printf(
-			"VERSION 19 new IDR segment: sequence=%d generation=%d PTS=%d NAL=%s",
+			"VERSION 22 new IDR segment: sequence=%d generation=%d PTS=%d NAL=%s",
 			s.NextSequence,
 			s.currentGeneration,
 			pts,
@@ -3063,7 +3286,7 @@ func (s *StreamSession) writeAccessUnit(
 
 	if hasIDR {
 		log.Printf(
-			"VERSION 19 MUX IDR: PTS=%d bytes=%d NAL=%s",
+			"VERSION 22 MUX IDR: PTS=%d bytes=%d NAL=%s",
 			pts,
 			len(outputAU),
 			s.lastMuxNALSummary,
@@ -3190,7 +3413,7 @@ func createStreamSession(
 	pc.OnConnectionStateChange(
 		func(state webrtc.PeerConnectionState) {
 			log.Printf(
-				"VERSION 19 WebRTC state: %s",
+				"VERSION 22 WebRTC state: %s",
 				state.String(),
 			)
 		},
@@ -3204,7 +3427,7 @@ func createStreamSession(
 			codec := track.Codec()
 
 			log.Printf(
-				"VERSION 19 incoming track: kind=%s codec=%s payload=%d",
+				"VERSION 22 incoming track: kind=%s codec=%s payload=%d",
 				track.Kind().String(),
 				codec.MimeType,
 				codec.PayloadType,
@@ -3223,7 +3446,7 @@ func createStreamSession(
 
 						if err != nil {
 							log.Println(
-								"VERSION 19 video RTP ended:",
+								"VERSION 22 video RTP ended:",
 								err,
 							)
 
@@ -3260,7 +3483,7 @@ func createStreamSession(
 
 						if err != nil {
 							log.Printf(
-								"VERSION 19 H264 depacketize error: %v",
+								"VERSION 22 H264 depacketize error: %v",
 								err,
 							)
 
@@ -3295,7 +3518,7 @@ func createStreamSession(
 							); err != nil {
 
 								log.Printf(
-									"VERSION 19 MPEGTS write error: %v",
+									"VERSION 22 MPEGTS write error: %v",
 									err,
 								)
 							}
@@ -3304,7 +3527,7 @@ func createStreamSession(
 								units%30 == 0 {
 
 								log.Printf(
-									"VERSION 19 H264 AU: units=%d packets=%d size=%d PTS=%d NAL=%s",
+									"VERSION 22 H264 AU: units=%d packets=%d size=%d PTS=%d NAL=%s",
 									units,
 									packets,
 									len(accessUnit),
@@ -3327,7 +3550,7 @@ func createStreamSession(
 
 						if err != nil {
 							log.Println(
-								"VERSION 19 audio RTP ended:",
+								"VERSION 22 audio RTP ended:",
 								err,
 							)
 
@@ -3472,7 +3695,7 @@ func createStreamSession(
 	}
 
 	log.Println(
-		"VERSION 19 SDP confirmed: audio -> video -> application",
+		"VERSION 22 SDP confirmed: audio -> video -> application",
 	)
 
 	payload := map[string]string{
@@ -3512,7 +3735,7 @@ func createStreamSession(
 	}
 
 	log.Printf(
-		"VERSION 19 Nest backend HTTP status: %d",
+		"VERSION 22 Nest backend HTTP status: %d",
 		resp.StatusCode,
 	)
 
@@ -3565,7 +3788,7 @@ func createStreamSession(
 	}
 
 	log.Println(
-		"VERSION 19 Nest WebRTC session started",
+		"VERSION 22 Nest WebRTC session started",
 	)
 
 	return session, nil
@@ -3705,7 +3928,7 @@ func health(
 		map[string]interface{}{
 			"status":    "ok",
 			"bridge":    "pion-h264-hls",
-			"version":   19,
+			"version":   22,
 			"streaming": streaming,
 
 			"segments":         segments,
@@ -3803,7 +4026,7 @@ func start(
 	}
 
 	log.Printf(
-		"VERSION 19 Shortcut body: %q",
+		"VERSION 22 Shortcut body: %q",
 		string(body),
 	)
 
@@ -3891,7 +4114,7 @@ func start(
 	camera := cameras[cameraIndex]
 
 	log.Printf(
-		"VERSION 19 starting camera %d: %s",
+		"VERSION 22 starting camera %d: %s",
 		cameraIndex,
 		camera.Name,
 	)
@@ -3905,7 +4128,7 @@ func start(
 
 	if err != nil {
 		log.Println(
-			"VERSION 19 camera start failed:",
+			"VERSION 22 camera start failed:",
 			err,
 		)
 
@@ -3925,7 +4148,7 @@ func start(
 	select {
 	case <-session.ready:
 		log.Println(
-			"VERSION 19 HLS READY",
+			"VERSION 22 HLS READY",
 		)
 
 	case <-time.After(25 * time.Second):
@@ -3987,7 +4210,7 @@ func start(
 
 			"vod": "/vod/index.m3u8",
 
-			"version": 19,
+			"version": 22,
 
 			"videoPackets": atomic.LoadUint64(
 				&session.Stats.VideoPackets,
@@ -4108,7 +4331,7 @@ func statusHandler(
 			200,
 			map[string]interface{}{
 				"streaming": false,
-				"version":   19,
+				"version":   22,
 			},
 		)
 
@@ -4179,7 +4402,7 @@ func statusHandler(
 		200,
 		map[string]interface{}{
 			"streaming": true,
-			"version":   19,
+			"version":   22,
 
 			"camera": session.Index,
 
@@ -4340,7 +4563,7 @@ func muxDiagnosticsHandler(
 			http.StatusNotFound,
 			map[string]interface{}{
 				"error":   "no active stream",
-				"version": 19,
+				"version": 22,
 			},
 		)
 
@@ -4361,7 +4584,7 @@ func muxDiagnosticsHandler(
 		w,
 		http.StatusOK,
 		map[string]interface{}{
-			"version": 19,
+			"version": 22,
 
 			"camera": session.Index,
 
@@ -4411,7 +4634,7 @@ func readbackDebugHandler(
 			http.StatusNotFound,
 			map[string]interface{}{
 				"error":   "no active stream",
-				"version": 21,
+				"version": 22,
 			},
 		)
 		return
@@ -4427,7 +4650,7 @@ func readbackDebugHandler(
 			http.StatusNotFound,
 			map[string]interface{}{
 				"error":   "no completed TS segments",
-				"version": 21,
+				"version": 22,
 			},
 		)
 		return
@@ -4446,13 +4669,14 @@ func readbackDebugHandler(
 		w,
 		http.StatusOK,
 		map[string]interface{}{
-			"version":           21,
+			"version":           22,
 			"sequence":          segment.Sequence,
 			"generation":        segment.Generation,
 			"duration":          segment.Duration,
 			"bytes":             len(segment.Data),
 			"diagnostics":       diagnostics,
 			"h264Compatibility": compatibility,
+			"version22Test":     "SPS VUI timing, color, aspect-ratio, and decoder-buffer restrictions",
 		},
 	)
 }
@@ -4468,7 +4692,7 @@ func tsDebugHandler(
 			http.StatusNotFound,
 			map[string]interface{}{
 				"error":   "no active stream",
-				"version": 19,
+				"version": 22,
 			},
 		)
 
@@ -4484,7 +4708,7 @@ func tsDebugHandler(
 			http.StatusNotFound,
 			map[string]interface{}{
 				"error":   "no completed TS segment",
-				"version": 19,
+				"version": 22,
 			},
 		)
 
@@ -4497,7 +4721,7 @@ func tsDebugHandler(
 		w,
 		http.StatusOK,
 		map[string]interface{}{
-			"version":             19,
+			"version":             22,
 			"sequence":            segment.Sequence,
 			"duration":            segment.Duration,
 			"bytes":               len(segment.Data),
@@ -4523,7 +4747,7 @@ func h264DebugHandler(
 			http.StatusNotFound,
 			map[string]interface{}{
 				"error":   "no active stream",
-				"version": 19,
+				"version": 22,
 			},
 		)
 
@@ -4554,7 +4778,7 @@ func h264DebugHandler(
 		w,
 		http.StatusOK,
 		map[string]interface{}{
-			"version": 19,
+			"version": 22,
 
 			"camera": session.Index,
 
@@ -4817,7 +5041,7 @@ func freezeVODHandler(
 			http.StatusMethodNotAllowed,
 			map[string]interface{}{
 				"error":   "GET or POST required",
-				"version": 19,
+				"version": 22,
 			},
 		)
 
@@ -4832,7 +5056,7 @@ func freezeVODHandler(
 			http.StatusNotFound,
 			map[string]interface{}{
 				"error":   "no active stream",
-				"version": 19,
+				"version": 22,
 			},
 		)
 
@@ -4849,7 +5073,7 @@ func freezeVODHandler(
 			http.StatusConflict,
 			map[string]interface{}{
 				"error":   "no completed validated segments available to freeze",
-				"version": 19,
+				"version": 22,
 			},
 		)
 
@@ -4871,7 +5095,7 @@ func freezeVODHandler(
 		map[string]interface{}{
 			"status": "frozen",
 
-			"version": 19,
+			"version": 22,
 
 			"camera": camera,
 
@@ -4901,7 +5125,7 @@ func vodStatusHandler(
 		w,
 		http.StatusOK,
 		map[string]interface{}{
-			"version": 19,
+			"version": 22,
 
 			"ready": frozenVOD.Ready,
 
@@ -5108,7 +5332,7 @@ func stopHandler(
 		http.StatusOK,
 		map[string]interface{}{
 			"status":  "stopped",
-			"version": 19,
+			"version": 22,
 		},
 	)
 }
@@ -5130,7 +5354,7 @@ func rootHandler(
 
 			"status": "online",
 
-			"version": 19,
+			"version": 22,
 
 			"media": "H264 -> MPEG-TS -> HLS",
 
@@ -5159,11 +5383,11 @@ func rootHandler(
 
 func main() {
 	log.Println(
-		"NestView TV Pion Roku bridge VERSION 19 starting",
+		"NestView TV Pion Roku bridge VERSION 22 starting",
 	)
 
 	log.Println(
-		"VERSION 19: canonical Annex-B mux-input diagnostics enabled",
+		"VERSION 22: canonical Annex-B mux-input diagnostics enabled",
 	)
 
 	http.HandleFunc(
@@ -5243,12 +5467,12 @@ func main() {
 	address := "0.0.0.0:" + port
 
 	log.Printf(
-		"VERSION 19 listening on %s",
+		"VERSION 22 listening on %s",
 		address,
 	)
 
 	if err := http.ListenAndServe(
-		address, no
+		address,
 		nil,
 	); err != nil {
 
