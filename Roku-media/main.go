@@ -5539,13 +5539,14 @@ func liveMasterPlaylistHandler(
 			session := getSession()
 			if session != nil {
 				session.mu.RLock()
-				wantGen, prevGen := -1, -1
+				wantGen, prevGen := uint64(0), uint64(0)
+				wantFound, prevFound := false, false
 				for i := range session.Segments {
-					if session.Segments[i].Sequence == wantSeq { wantGen = session.Segments[i].Generation }
-					if session.Segments[i].Sequence == prevSeq { prevGen = session.Segments[i].Generation }
+					if session.Segments[i].Sequence == wantSeq { wantGen = session.Segments[i].Generation; wantFound = true }
+					if session.Segments[i].Sequence == prevSeq { prevGen = session.Segments[i].Generation; prevFound = true }
 				}
 				session.mu.RUnlock()
-				if wantGen >= 0 && prevGen >= 0 && wantGen != prevGen {
+				if wantFound && prevFound && wantGen != prevGen {
 					outLines = append(outLines, "#EXT-X-DISCONTINUITY")
 					log.Printf("VERSION 78 PLAYLIST CODEC DISCONTINUITY appleIndex=%d fromGeneration=%d toGeneration=%d", mediaIndex, prevGen, wantGen)
 				}
