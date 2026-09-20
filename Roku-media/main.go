@@ -5470,7 +5470,7 @@ func appleSegmentTraceHandler(w http.ResponseWriter, r *http.Request) {
 		// Group validated segments by generation, then use the newest generation
 		// that contains at least five consecutive stored segments.
 		var chosen []HLSSegment
-		var chosenGeneration int
+		var chosenGeneration uint64
 		for pos := len(all) - 1; pos >= 0 && len(chosen) == 0; pos-- {
 			gen := all[pos].Generation
 			var group []HLSSegment
