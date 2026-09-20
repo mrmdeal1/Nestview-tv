@@ -480,7 +480,7 @@ func buildFrozenVOD(session *StreamSession) (int, float64) {
 	frozenVOD.mu.Unlock()
 
 	log.Printf(
-		"VERSION 67 FROZEN VOD READY: camera=%d name=%s generation=%d segments=%d duration=%.3f codec=[%s]",
+		"VERSION 68 FROZEN VOD READY: camera=%d name=%s generation=%d segments=%d duration=%.3f codec=[%s]",
 		cameraIndex,
 		cameraName,
 		generation,
@@ -551,7 +551,7 @@ func getCameras() ([]Camera, error) {
 
 	for attempt := 1; attempt <= 3; attempt++ {
 		log.Printf(
-			"VERSION 67 camera backend request attempt=%d url=%s/api/cameras",
+			"VERSION 68 camera backend request attempt=%d url=%s/api/cameras",
 			attempt,
 			nestBackend,
 		)
@@ -561,7 +561,7 @@ func getCameras() ([]Camera, error) {
 		if err != nil {
 			lastErr = err
 			log.Printf(
-				"VERSION 67 camera backend request failed attempt=%d error=%v",
+				"VERSION 68 camera backend request failed attempt=%d error=%v",
 				attempt,
 				err,
 			)
@@ -572,7 +572,7 @@ func getCameras() ([]Camera, error) {
 			if readErr != nil {
 				lastErr = readErr
 				log.Printf(
-					"VERSION 67 camera backend read failed attempt=%d error=%v",
+					"VERSION 68 camera backend read failed attempt=%d error=%v",
 					attempt,
 					readErr,
 				)
@@ -584,7 +584,7 @@ func getCameras() ([]Camera, error) {
 				)
 
 				log.Printf(
-					"VERSION 67 camera backend HTTP failure attempt=%d status=%d body=%q",
+					"VERSION 68 camera backend HTTP failure attempt=%d status=%d body=%q",
 					attempt,
 					resp.StatusCode,
 					string(responseBody),
@@ -593,7 +593,7 @@ func getCameras() ([]Camera, error) {
 				body = responseBody
 
 				log.Printf(
-					"VERSION 67 camera backend success attempt=%d status=%d bytes=%d",
+					"VERSION 68 camera backend success attempt=%d status=%d bytes=%d",
 					attempt,
 					resp.StatusCode,
 					len(body),
@@ -1443,7 +1443,7 @@ func (s *StreamSession) inspectSliceOrderingLocked(
 			s.h264SliceDiagnostics = diagnostic
 
 			log.Printf(
-				"VERSION 67 H264 SLICE PARSE ERROR: NAL=%d PTS=%d error=%s",
+				"VERSION 68 H264 SLICE PARSE ERROR: NAL=%d PTS=%d error=%s",
 				nalType,
 				pts,
 				diagnostic.Error,
@@ -1511,7 +1511,7 @@ func (s *StreamSession) inspectSliceOrderingLocked(
 			diagnostic.POCBackward {
 
 			log.Printf(
-				"VERSION 67 H264 REORDER SIGNAL: slice=%s frameNum=%d POC=%d previousPOC=%d POCBackward=%t IDR=%t PTS=%d",
+				"VERSION 68 H264 REORDER SIGNAL: slice=%s frameNum=%d POC=%d previousPOC=%d POCBackward=%t IDR=%t PTS=%d",
 				diagnostic.SliceType,
 				diagnostic.FrameNum,
 				diagnostic.PicOrderCntLSB,
@@ -2178,7 +2178,7 @@ func (s *StreamSession) updateH264DiagnosticsLocked(
 	if !diagnostics.Valid {
 		if hasSPS {
 			log.Printf(
-				"VERSION 67 H264 SPS PARSE ERROR: %s",
+				"VERSION 68 H264 SPS PARSE ERROR: %s",
 				diagnostics.Error,
 			)
 		}
@@ -2194,7 +2194,7 @@ func (s *StreamSession) updateH264DiagnosticsLocked(
 		s.currentGeneration = 0
 
 		log.Printf(
-			"VERSION 67 H264 INITIAL CODEC: %s profileName=%s levelName=%s SPS=%d PPS=%d IDR=%t PTS=%d",
+			"VERSION 68 H264 INITIAL CODEC: %s profileName=%s levelName=%s SPS=%d PPS=%d IDR=%t PTS=%d",
 			codecSignatureString(signature),
 			diagnostics.Profile,
 			diagnostics.Level,
@@ -2211,7 +2211,7 @@ func (s *StreamSession) updateH264DiagnosticsLocked(
 	if sameCodecSignature(s.activeCodec, signature) {
 		if !s.h264Logged {
 			log.Printf(
-				"VERSION 67 H264 CODEC: %s",
+				"VERSION 68 H264 CODEC: %s",
 				codecSignatureString(signature),
 			)
 
@@ -2229,7 +2229,7 @@ func (s *StreamSession) updateH264DiagnosticsLocked(
 	)
 
 	log.Printf(
-		"VERSION 67 CODEC CHANGE DETECTED #%d: FROM [%s] TO [%s] IDR=%t PTS=%d",
+		"VERSION 68 CODEC CHANGE DETECTED #%d: FROM [%s] TO [%s] IDR=%t PTS=%d",
 		changeNumber,
 		codecSignatureString(oldCodec),
 		codecSignatureString(signature),
@@ -2242,7 +2242,7 @@ func (s *StreamSession) updateH264DiagnosticsLocked(
 		s.currentBuffer.Len() > 0 {
 
 		log.Printf(
-			"VERSION 67 closing old codec segment before SPS transition: sequence=%d generation=%d",
+			"VERSION 68 closing old codec segment before SPS transition: sequence=%d generation=%d",
 			s.NextSequence,
 			s.currentGeneration,
 		)
@@ -2280,7 +2280,7 @@ func (s *StreamSession) updateH264DiagnosticsLocked(
 	}
 
 	log.Printf(
-		"VERSION 67 HLS DISCONTINUITY ARMED: generation=%d nextSequence=%d",
+		"VERSION 68 HLS DISCONTINUITY ARMED: generation=%d nextSequence=%d",
 		s.currentGeneration,
 		s.NextSequence,
 	)
@@ -2298,7 +2298,7 @@ func (s *StreamSession) cacheParametersLocked(
 		s.sps = append([]byte(nil), newSPS...)
 
 		log.Printf(
-			"VERSION 67 cached SPS: %d bytes",
+			"VERSION 68 cached SPS: %d bytes",
 			len(s.sps),
 		)
 	}
@@ -2310,7 +2310,7 @@ func (s *StreamSession) cacheParametersLocked(
 		s.pps = append([]byte(nil), newPPS...)
 
 		log.Printf(
-			"VERSION 67 cached PPS: %d bytes",
+			"VERSION 68 cached PPS: %d bytes",
 			len(s.pps),
 		)
 	}
@@ -2328,7 +2328,7 @@ func (s *StreamSession) normalizeTimestamp(
 		s.normalizedPTS = ptsOffset
 
 		log.Printf(
-			"VERSION 67 timestamp clock started: RTP=%d PTS=%d",
+			"VERSION 68 timestamp clock started: RTP=%d PTS=%d",
 			rtpTimestamp,
 			s.normalizedPTS,
 		)
@@ -2345,7 +2345,7 @@ func (s *StreamSession) normalizeTimestamp(
 		)
 
 		log.Printf(
-			"VERSION 67 timestamp discontinuity: previous=%d current=%d rawDelta=%d",
+			"VERSION 68 timestamp discontinuity: previous=%d current=%d rawDelta=%d",
 			s.lastRTPTimestamp,
 			rtpTimestamp,
 			delta,
@@ -3196,7 +3196,7 @@ func (s *StreamSession) newSegmentLocked() error {
 	}
 
 	log.Printf(
-		"VERSION 67 SEGMENT OPEN: sequence=%d generation=%d codec=[%s] discontinuity=%t",
+		"VERSION 68 SEGMENT OPEN: sequence=%d generation=%d codec=[%s] discontinuity=%t",
 		s.NextSequence,
 		s.currentGeneration,
 		codecSignatureString(s.currentSegmentCodec),
@@ -3251,7 +3251,7 @@ func (s *StreamSession) finishSegmentLocked() {
 		)
 
 		log.Printf(
-			"VERSION 67 TS MEDIA VALID: packets=%d bytes=%d PAT=%d PMT=%d videoPID=%d streamType=0x%02x PES=%d PTS=%d DTS=%d PCR=%d continuityErrors=%d firstPTS=%d lastPTS=%d",
+			"VERSION 68 TS MEDIA VALID: packets=%d bytes=%d PAT=%d PMT=%d videoPID=%d streamType=0x%02x PES=%d PTS=%d DTS=%d PCR=%d continuityErrors=%d firstPTS=%d lastPTS=%d",
 			diagnostics.Packets,
 			diagnostics.Bytes,
 			diagnostics.PATPackets,
@@ -3273,7 +3273,7 @@ func (s *StreamSession) finishSegmentLocked() {
 		)
 
 		log.Printf(
-			"VERSION 67 TS MEDIA INVALID: error=%s packets=%d PAT=%d PMT=%d videoPID=%d streamType=0x%02x PES=%d PTS=%d backwardPTS=%d PCR=%d continuityErrors=%d transportErrors=%d",
+			"VERSION 68 TS MEDIA INVALID: error=%s packets=%d PAT=%d PMT=%d videoPID=%d streamType=0x%02x PES=%d PTS=%d backwardPTS=%d PCR=%d continuityErrors=%d transportErrors=%d",
 			validateErr,
 			diagnostics.Packets,
 			diagnostics.PATPackets,
@@ -3329,7 +3329,7 @@ func (s *StreamSession) finishSegmentLocked() {
 	)
 
 	log.Printf(
-		"VERSION 67 HLS SEGMENT READY: sequence=%d generation=%d duration=%.3f size=%d mediaValid=%t discontinuityBefore=%t codec=[%s]",
+		"VERSION 68 HLS SEGMENT READY: sequence=%d generation=%d duration=%.3f size=%d mediaValid=%t discontinuityBefore=%t codec=[%s]",
 		segment.Sequence,
 		segment.Generation,
 		segment.Duration,
@@ -3426,7 +3426,7 @@ func (s *StreamSession) keyframeAccessUnitLocked(
 
 	if changed {
 		log.Printf(
-			"VERSION 67 H264 NORMALIZE: before=%s after=%s removedSPS=%d removedPPS=%d",
+			"VERSION 68 H264 NORMALIZE: before=%s after=%s removedSPS=%d removedPPS=%d",
 			before,
 			after,
 			duplicateSPS,
@@ -3543,7 +3543,7 @@ func (s *StreamSession) writeAccessUnit(
 		}
 
 		log.Printf(
-			"VERSION 67 HLS started on IDR: generation=%d SPS=%t PPS=%t PTS=%d NAL=%s codec=[%s]",
+			"VERSION 68 HLS started on IDR: generation=%d SPS=%t PPS=%t PTS=%d NAL=%s codec=[%s]",
 			s.currentGeneration,
 			len(s.sps) > 0,
 			len(s.pps) > 0,
@@ -3565,7 +3565,7 @@ func (s *StreamSession) writeAccessUnit(
 		}
 
 		log.Printf(
-			"VERSION 67 new IDR segment: sequence=%d generation=%d PTS=%d NAL=%s",
+			"VERSION 68 new IDR segment: sequence=%d generation=%d PTS=%d NAL=%s",
 			s.NextSequence,
 			s.currentGeneration,
 			pts,
@@ -3588,14 +3588,14 @@ func (s *StreamSession) writeAccessUnit(
 
 	if hasIDR {
 		log.Printf(
-			"VERSION 67 MUX IDR: PTS=%d bytes=%d NAL=%s",
+			"VERSION 68 MUX IDR: PTS=%d bytes=%d NAL=%s",
 			pts,
 			len(outputAU),
 			s.lastMuxNALSummary,
 		)
 	}
 
-	// VERSION 67: give Roku an explicit decode timestamp (DTS).
+	// VERSION 68: give Roku an explicit decode timestamp (DTS).
 	// Pion omits the DTS field when DTS == PTS; the Nest H.264 stream
 	// signals frame reordering, so keep DTS slightly behind PTS.
 	dts := pts - 9000 // 100 ms on the 90 kHz MPEG clock
@@ -3723,7 +3723,7 @@ func createStreamSession(
 	pc.OnConnectionStateChange(
 		func(state webrtc.PeerConnectionState) {
 			log.Printf(
-				"VERSION 67 WebRTC state: %s",
+				"VERSION 68 WebRTC state: %s",
 				state.String(),
 			)
 		},
@@ -3737,7 +3737,7 @@ func createStreamSession(
 			codec := track.Codec()
 
 			log.Printf(
-				"VERSION 67 incoming track: kind=%s codec=%s payload=%d",
+				"VERSION 68 incoming track: kind=%s codec=%s payload=%d",
 				track.Kind().String(),
 				codec.MimeType,
 				codec.PayloadType,
@@ -3756,7 +3756,7 @@ func createStreamSession(
 
 						if err != nil {
 							log.Println(
-								"VERSION 67 video RTP ended:",
+								"VERSION 68 video RTP ended:",
 								err,
 							)
 
@@ -3793,7 +3793,7 @@ func createStreamSession(
 
 						if err != nil {
 							log.Printf(
-								"VERSION 67 H264 depacketize error: %v",
+								"VERSION 68 H264 depacketize error: %v",
 								err,
 							)
 
@@ -3828,7 +3828,7 @@ func createStreamSession(
 							); err != nil {
 
 								log.Printf(
-									"VERSION 67 MPEGTS write error: %v",
+									"VERSION 68 MPEGTS write error: %v",
 									err,
 								)
 							}
@@ -3837,7 +3837,7 @@ func createStreamSession(
 								units%30 == 0 {
 
 								log.Printf(
-									"VERSION 67 H264 AU: units=%d packets=%d size=%d PTS=%d NAL=%s",
+									"VERSION 68 H264 AU: units=%d packets=%d size=%d PTS=%d NAL=%s",
 									units,
 									packets,
 									len(accessUnit),
@@ -3860,7 +3860,7 @@ func createStreamSession(
 
 						if err != nil {
 							log.Println(
-								"VERSION 67 audio RTP ended:",
+								"VERSION 68 audio RTP ended:",
 								err,
 							)
 
@@ -4005,7 +4005,7 @@ func createStreamSession(
 	}
 
 	log.Println(
-		"VERSION 67 SDP confirmed: audio -> video -> application",
+		"VERSION 68 SDP confirmed: audio -> video -> application",
 	)
 
 	payload := map[string]string{
@@ -4045,7 +4045,7 @@ func createStreamSession(
 	}
 
 	log.Printf(
-		"VERSION 67 Nest backend HTTP status: %d",
+		"VERSION 68 Nest backend HTTP status: %d",
 		resp.StatusCode,
 	)
 
@@ -4098,7 +4098,7 @@ func createStreamSession(
 	}
 
 	log.Println(
-		"VERSION 67 Nest WebRTC session started",
+		"VERSION 68 Nest WebRTC session started",
 	)
 
 	return session, nil
@@ -4336,7 +4336,7 @@ func start(
 	}
 
 	log.Printf(
-		"VERSION 67 Shortcut body: %q",
+		"VERSION 68 Shortcut body: %q",
 		string(body),
 	)
 
@@ -4394,7 +4394,7 @@ func start(
 	}
 
 	log.Printf(
-		"VERSION 67 start request parsed: camera=%d; requesting camera list",
+		"VERSION 68 start request parsed: camera=%d; requesting camera list",
 		cameraIndex,
 	)
 
@@ -4402,7 +4402,7 @@ func start(
 
 	if err != nil {
 		log.Printf(
-			"VERSION 67 start stopped at camera backend: %v",
+			"VERSION 68 start stopped at camera backend: %v",
 			err,
 		)
 
@@ -4418,7 +4418,7 @@ func start(
 	}
 
 	log.Printf(
-		"VERSION 67 camera list ready: count=%d requested=%d",
+		"VERSION 68 camera list ready: count=%d requested=%d",
 		len(cameras),
 		cameraIndex,
 	)
@@ -4440,7 +4440,7 @@ func start(
 	camera := cameras[cameraIndex]
 
 	log.Printf(
-		"VERSION 67 starting camera %d: %s",
+		"VERSION 68 starting camera %d: %s",
 		cameraIndex,
 		camera.Name,
 	)
@@ -4454,7 +4454,7 @@ func start(
 
 	if err != nil {
 		log.Println(
-			"VERSION 67 camera start failed:",
+			"VERSION 68 camera start failed:",
 			err,
 		)
 
@@ -4474,7 +4474,7 @@ func start(
 	select {
 	case <-session.ready:
 		log.Println(
-			"VERSION 67 HLS READY",
+			"VERSION 68 HLS READY",
 		)
 
 	case <-time.After(25 * time.Second):
@@ -5126,7 +5126,7 @@ func snapshotLatestDebugSegment() (HLSSegment, int, error) {
 	debugSegmentSnapshot.mu.Unlock()
 
 	log.Printf(
-		"VERSION 67 DEBUG SEGMENT SNAPSHOT: camera=%d generation=%d sequence=%d bytes=%d",
+		"VERSION 68 DEBUG SEGMENT SNAPSHOT: camera=%d generation=%d sequence=%d bytes=%d",
 		camera,
 		segment.Generation,
 		segment.Sequence,
@@ -5403,7 +5403,7 @@ func liveMasterPlaylistHandler(
 	w http.ResponseWriter,
 	r *http.Request,
 ) {
-	log.Printf("VERSION 67 ROKU REQUEST STEP=APPLE_SEGMENT_TRACE method=%s path=%s ua=%q remote=%s", r.Method, r.URL.Path, r.UserAgent(), r.RemoteAddr)
+	log.Printf("VERSION 68 ROKU REQUEST STEP=APPLE_SEGMENT_TRACE method=%s path=%s ua=%q remote=%s", r.Method, r.URL.Path, r.UserAgent(), r.RemoteAddr)
 
 	masterURL := "https://devstreaming-cdn.apple.com/videos/streaming/examples/bipbop_4x3/bipbop_4x3_variant.m3u8"
 	masterBase := "https://devstreaming-cdn.apple.com/videos/streaming/examples/bipbop_4x3/"
@@ -5444,14 +5444,43 @@ func liveMasterPlaylistHandler(
 	w.Header().Set("Content-Type", "application/x-mpegURL")
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Content-Length", strconv.Itoa(len(out)))
-	log.Printf("VERSION 67 APPLE SEGMENT TRACE PLAYLIST child=%s mediaURIs=%d bytes=%d", childURL, mediaIndex, len(out))
+	log.Printf("VERSION 68 APPLE SEGMENT TRACE PLAYLIST child=%s mediaURIs=%d bytes=%d", childURL, mediaIndex, len(out))
 	_, _ = io.WriteString(w, out)
 }
 
 func appleSegmentTraceHandler(w http.ResponseWriter, r *http.Request) {
 	idx := r.URL.Query().Get("i")
 	target := r.URL.Query().Get("u")
-	log.Printf("VERSION 67 ROKU APPLE SEGMENT REQUEST index=%s target=%s ua=%q", idx, target, r.UserAgent())
+	log.Printf("VERSION 68 ROKU APPLE SEGMENT REQUEST index=%s target=%s ua=%q", idx, target, r.UserAgent())
+
+	// V68: Roku starts at Apple index 8. At that exact request, return the
+	// newest validated Nest MPEG-TS segment instead. All other indexes stay Apple.
+	if idx == "8" {
+		session := getSession()
+		if session == nil {
+			http.Error(w, "no active Nest stream", http.StatusServiceUnavailable)
+			return
+		}
+		session.mu.RLock()
+		all := append([]HLSSegment(nil), session.Segments...)
+		session.mu.RUnlock()
+
+		for i := len(all) - 1; i >= 0; i-- {
+			seg := all[i]
+			if seg.Validated && len(seg.Data) > 0 {
+				body := append([]byte(nil), seg.Data...)
+				w.Header().Set("Content-Type", "video/MP2T")
+				w.Header().Set("Cache-Control", "no-store")
+				w.Header().Set("Content-Length", strconv.Itoa(len(body)))
+				log.Printf("VERSION 68 FORCED NEST SEGMENT AT APPLE INDEX 8 sequence=%d generation=%d duration=%.3f bytes=%d", seg.Sequence, seg.Generation, seg.Duration, len(body))
+				_, _ = w.Write(body)
+				return
+			}
+		}
+		http.Error(w, "validated Nest segment not ready", http.StatusServiceUnavailable)
+		return
+	}
+
 	if target == "" { http.Error(w, "missing target", 400); return }
 	resp, err := http.Get(target)
 	if err != nil { http.Error(w, "apple segment fetch failed", 502); return }
@@ -5463,7 +5492,7 @@ func appleSegmentTraceHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", ct)
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Content-Length", strconv.Itoa(len(body)))
-	log.Printf("VERSION 67 APPLE SEGMENT SERVED index=%s bytes=%d type=%q", idx, len(body), ct)
+	log.Printf("VERSION 68 APPLE SEGMENT SERVED index=%s bytes=%d type=%q", idx, len(body), ct)
 	_, _ = w.Write(body)
 }
 
@@ -5471,7 +5500,7 @@ func livePlaylistHandler(
 	w http.ResponseWriter,
 	r *http.Request,
 ) {
-	log.Printf("VERSION 67 ROKU REQUEST STEP=MEDIA method=%s path=%s query=%q ua=%q remote=%s", r.Method, r.URL.Path, r.URL.RawQuery, r.UserAgent(), r.RemoteAddr)
+	log.Printf("VERSION 68 ROKU REQUEST STEP=MEDIA method=%s path=%s query=%q ua=%q remote=%s", r.Method, r.URL.Path, r.URL.RawQuery, r.UserAgent(), r.RemoteAddr)
 	session := getSession()
 
 	if session == nil {
@@ -5503,7 +5532,7 @@ func livePlaylistHandler(
 		return
 	}
 
-	// VERSION 67: Roku startup buffer guard. Prefer the newest codec
+	// VERSION 68: Roku startup buffer guard. Prefer the newest codec
 	// generation only after it has at least 3 complete validated segments.
 	// Until then, keep advertising the previous generation if it has enough
 	// segments. This prevents Roku from seeing only 1-2 segments and stalling
@@ -5542,7 +5571,7 @@ func livePlaylistHandler(
 	}
 
 	log.Printf(
-		"VERSION 67 ROKU STARTUP WINDOW: latestGeneration=%d latestCount=%d selectedGeneration=%d selectedCount=%d minimum=%d",
+		"VERSION 68 ROKU STARTUP WINDOW: latestGeneration=%d latestCount=%d selectedGeneration=%d selectedCount=%d minimum=%d",
 		latestGeneration,
 		counts[latestGeneration],
 		selectedGeneration,
@@ -5560,13 +5589,13 @@ func livePlaylistHandler(
 		return
 	}
 
-	// VERSION 67: Never advertise an undersized startup playlist to Roku.
+	// VERSION 68: Never advertise an undersized startup playlist to Roku.
 	// V45 proved Roku requested the media playlist with only 1 segment, then
 	// again with only 2 segments, and quit before requesting any TS file.
 	// Return 503 until a full 3-segment same-generation startup window exists.
 	if len(filtered) < rokuStartupSegments {
 		log.Printf(
-			"VERSION 67 ROKU MEDIA NOT READY: generation=%d ready=%d required=%d returning=503",
+			"VERSION 68 ROKU MEDIA NOT READY: generation=%d ready=%d required=%d returning=503",
 			selectedGeneration,
 			len(filtered),
 			rokuStartupSegments,
@@ -5583,7 +5612,7 @@ func livePlaylistHandler(
 
 	if len(filtered) != len(segments) {
 		log.Printf(
-			"VERSION 67 LIVE PLAYLIST GENERATION FILTER: generation=%d kept=%d dropped=%d",
+			"VERSION 68 LIVE PLAYLIST GENERATION FILTER: generation=%d kept=%d dropped=%d",
 			selectedGeneration,
 			len(filtered),
 			len(segments)-len(filtered),
@@ -5665,7 +5694,7 @@ func livePlaylistHandler(
 
 	body := playlist.String()
 	w.Header().Set("Content-Length", strconv.Itoa(len(body)))
-	log.Printf("VERSION 67 ROKU MEDIA PLAYLIST BODY bytes=%d:\n%s", len(body), body)
+	log.Printf("VERSION 68 ROKU MEDIA PLAYLIST BODY bytes=%d:\n%s", len(body), body)
 
 	_, _ = io.WriteString(
 		w,
@@ -5677,7 +5706,7 @@ func liveSegmentHandler(
 	w http.ResponseWriter,
 	r *http.Request,
 ) {
-	log.Printf("VERSION 67 ROKU REQUEST STEP=SEGMENT method=%s path=%s query=%q range=%q ua=%q remote=%s", r.Method, r.URL.Path, r.URL.RawQuery, r.Header.Get("Range"), r.UserAgent(), r.RemoteAddr)
+	log.Printf("VERSION 68 ROKU REQUEST STEP=SEGMENT method=%s path=%s query=%q range=%q ua=%q remote=%s", r.Method, r.URL.Path, r.URL.RawQuery, r.Header.Get("Range"), r.UserAgent(), r.RemoteAddr)
 	session := getSession()
 
 	if session == nil {
@@ -6107,11 +6136,11 @@ func rootHandler(
 
 func main() {
 	log.Println(
-		"NestView TV Pion Roku bridge VERSION 67 starting",
+		"NestView TV Pion Roku bridge VERSION 68 starting",
 	)
 
 	log.Println(
-		"VERSION 67: camera-backend retry and start-boundary diagnostics enabled",
+		"VERSION 68: camera-backend retry and start-boundary diagnostics enabled",
 	)
 
 	http.HandleFunc(
@@ -6173,7 +6202,7 @@ func main() {
 		readbackDebugHandler,
 	)
 
-	// VERSION 67: keep V56's proven HTTP redirect path, but redirect Roku
+	// VERSION 68: keep V56's proven HTTP redirect path, but redirect Roku
 	// to NestView's media playlist instead of Apple's control stream.
 	http.HandleFunc(
 		"/live/index.m3u8",
@@ -6222,7 +6251,7 @@ func main() {
 	address := "0.0.0.0:" + port
 
 	log.Printf(
-		"VERSION 67 listening on %s",
+		"VERSION 68 listening on %s",
 		address,
 	)
 
