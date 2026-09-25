@@ -3811,10 +3811,37 @@ func scheduleRecovery(source *StreamSession, reason string) {
 			fresh.pendingDiscontinuity = true
 			fresh.mu.Unlock()
 
-			replaceSession(fresh)
-			log.Printf("VERSION 101 RECOVERY CONNECTED attempt=%d nextSequence=%d preservedSegments=%d", attempt, nextSequence, len(oldSegments))
-			startStallWatchdog(fresh)
-			return
+			// VERSION 102: do not promote a recovery session until it has
+			// actually produced fresh HLS media. createStreamSession returning
+			// successfully only proves the WebRTC session was created.
+			select {
+			case <-fresh.ready:
+				log.Printf(
+					"VERSION 102 RECOVERY MEDIA READY attempt=%d camera=%d",
+					attempt,
+					source.Index,
+				)
+
+				replaceSession(fresh)
+
+				log.Printf(
+					"VERSION 102 RECOVERY CONNECTED attempt=%d nextSequence=%d preservedSegments=%d",
+					attempt,
+					nextSequence,
+					len(oldSegments),
+				)
+
+				startStallWatchdog(fresh)
+				return
+
+			case <-time.After(25 * time.Second):
+				log.Printf(
+					"VERSION 102 RECOVERY ATTEMPT=%d timed out waiting for fresh HLS media",
+					attempt,
+				)
+				fresh.Close()
+				continue
+			}
 		}
 
 		log.Printf("VERSION 101 RECOVERY EXHAUSTED camera=%d", source.Index)
